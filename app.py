@@ -4,6 +4,8 @@ import os
 import io
 import datetime
 import base64
+import numpy as np
+from PIL import Image as PILImage
 from streamlit_drawable_canvas import st_canvas
 from supabase import create_client, Client
 
@@ -14,8 +16,9 @@ from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA E BASE DE DADOS ---
 st.set_page_config(page_title="LIS SISTEMAS - Gestão de Obras", layout="centered")
@@ -29,29 +32,56 @@ try:
 except Exception as e:
     st.error("Erro de ligação à Base de Dados. Verifica os Secrets.")
 
-# --- 2. FUNÇÃO PARA GERAR O PDF ---
-def gerar_pdf_obra(dados):
+# --- 2. FUNÇÃO PARA GERAR O PDF PROFISSIONAL ---
+def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
     elementos = []
-    estilos = getSampleStyleSheet()
     
-    elementos.append(Paragraph("<b>LIS SISTEMAS, LDA - FOLHA DE OBRA</b>", estilos['Heading2']))
+    # Estilos customizados (Letras maiores e mais visíveis)
+    estilos = getSampleStyleSheet()
+    estilo_titulo = ParagraphStyle('Titulo', fontName='Helvetica-Bold', fontSize=18, spaceAfter=25)
+    estilo_normal = ParagraphStyle('Normal', fontName='Helvetica', fontSize=12, spaceAfter=8, leading=16)
+    estilo_bold = ParagraphStyle('Negrito', fontName='Helvetica-Bold', fontSize=12, spaceAfter=8, leading=16)
+    estilo_destaque = ParagraphStyle('Destaque', fontName='Helvetica-Bold', fontSize=14, textColor=colors.firebrick, spaceAfter=5)
+    estilo_disclaimer = ParagraphStyle('Disclaimer', fontName='Helvetica-Oblique', fontSize=10, textColor=colors.dimgrey, spaceAfter=25)
+    
+    # Cabeçalho
+    elementos.append(Paragraph("LIS SISTEMAS, LDA - FOLHA DE OBRA", estilo_titulo))
+    
+    # Dados Principais
+    elementos.append(Paragraph(f"<b>Cliente / Empresa:</b> {dados.get('cliente', '')} | <b>Responsável:</b> {dados.get('nome_contacto', '')}", estilo_normal))
+    elementos.append(Paragraph(f"<b>Email:</b> {dados.get('email', '')} | <b>Serviço:</b> {dados.get('tipo_servico', '')}", estilo_normal))
     elementos.append(Spacer(1, 15))
-    elementos.append(Paragraph(f"<b>Cliente:</b> {dados.get('cliente', '')}", estilos['Normal']))
-    elementos.append(Paragraph(f"<b>Email:</b> {dados.get('email', '')}", estilos['Normal']))
-    elementos.append(Paragraph(f"<b>Serviço:</b> {dados.get('tipo_servico', '')}", estilos['Normal']))
-    elementos.append(Spacer(1, 10))
-    elementos.append(Paragraph(f"<b>Técnico:</b> {dados.get('tecnico', '')} | <b>Horário:</b> {dados.get('hora_inicio', '')} - {dados.get('hora_fim', '')}", estilos['Normal']))
-    elementos.append(Paragraph(f"<b>Deslocação:</b> {dados.get('deslocacao', 0)} Km", estilos['Normal']))
-    elementos.append(Spacer(1, 10))
-    elementos.append(Paragraph("<b>Descrição da Avaria:</b>", estilos['Normal']))
-    elementos.append(Paragraph(f"{dados.get('descricao', '')}", estilos['Normal']))
-    elementos.append(Spacer(1, 10))
-    elementos.append(Paragraph("<b>Tarefas Realizadas:</b>", estilos['Normal']))
-    elementos.append(Paragraph(f"{dados.get('tarefas', '')}", estilos['Normal']))
+    
+    # Intervenção
+    elementos.append(Paragraph(f"<b>Técnico:</b> {dados.get('tecnico', '')} | <b>Horário:</b> {dados.get('hora_inicio', '')} às {dados.get('hora_fim', '')}", estilo_normal))
+    elementos.append(Paragraph(f"<b>Deslocação:</b> {dados.get('deslocacao', 0)} Km", estilo_normal))
+    elementos.append(Spacer(1, 20))
+    
+    # Descrições
+    elementos.append(Paragraph("<b>Descrição da Avaria / Pedido inicial:</b>", estilo_bold))
+    elementos.append(Paragraph(f"{dados.get('descricao', '')}", estilo_normal))
     elementos.append(Spacer(1, 15))
-    elementos.append(Paragraph(f"<b>Total de Materiais:</b> {dados.get('total_materiais', 0)} EUR", estilos['Heading3']))
+    
+    elementos.append(Paragraph("<b>Tarefas Realizadas:</b>", estilo_bold))
+    elementos.append(Paragraph(f"{dados.get('tarefas', '')}", estilo_normal))
+    elementos.append(Spacer(1, 20))
+    
+    # Totais e Disclaimer
+    elementos.append(Paragraph(f"<b>Total de Materiais Aplicados:</b> {dados.get('total_materiais', 0):.2f} EUR", estilo_destaque))
+    elementos.append(Paragraph("* Não inclui IVA. A todos os valores acrescentar a taxa legal em vigor.", estilo_disclaimer))
+    
+    # Zona de Assinaturas
+    elementos.append(Paragraph("<b>Data da folha de obra:</b> _____ / _____ / _________", estilo_normal))
+    elementos.append(Spacer(1, 15))
+    
+    if assinou and assinatura_buffer:
+        elementos.append(Paragraph("<b>Assinatura do Cliente:</b>", estilo_normal))
+        elementos.append(RLImage(assinatura_buffer, width=200, height=100))
+    else:
+        elementos.append(Spacer(1, 10))
+        elementos.append(Paragraph("<b>Assinatura:</b> ____________________________________________________", estilo_normal))
     
     doc.build(elementos)
     buffer.seek(0)
@@ -70,13 +100,14 @@ with col1:
     cliente = st.text_input("Cliente / Empresa")
     email = st.text_input("Email")
 with col2:
-    nome_contacto = st.text_input("Nome")
+    nome_contacto = st.text_input("Responsável")
     tipo_servico = st.selectbox("Tipo de Serviço", ["Assistência", "Instalação"])
 st.divider()
 
 st.markdown("### 2. Produtos e Equipamentos")
+# O 1.0 garante que a coluna aceita números decimais
 if 'df_produtos' not in st.session_state:
-    st.session_state.df_produtos = pd.DataFrame([{"Qtd": 1, "Descrição do Produto / Equipamento": ""} for _ in range(2)])
+    st.session_state.df_produtos = pd.DataFrame([{"Qtd": 1.0, "Descrição do Produto / Equipamento": ""} for _ in range(2)])
 tabela_produtos = st.data_editor(st.session_state.df_produtos, num_rows="dynamic", use_container_width=True)
 st.divider()
 
@@ -89,19 +120,22 @@ col_t, col_hi, col_hf, col_km = st.columns(4)
 tecnico = col_t.text_input("Técnico")
 hora_inicio = col_hi.time_input("Hora Início", datetime.time(9, 0))
 hora_fim = col_hf.time_input("Hora Fim", datetime.time(10, 0))
-deslocacao = col_km.number_input("Deslocação (Km)", min_value=0)
+deslocacao = col_km.number_input("Deslocação (Km)", min_value=0.0, step=0.5)
 st.divider()
 
 st.markdown("### 5. Materiais Aplicados")
+# O 1.0 e 0.00 garantem casas decimais nestas colunas também
 if 'df_materiais' not in st.session_state:
-    st.session_state.df_materiais = pd.DataFrame([{"Quantidade": 1, "Produto": "", "Preço Unitário (EUR)": 0.00} for _ in range(3)])
+    st.session_state.df_materiais = pd.DataFrame([{"Quantidade": 1.0, "Produto": "", "Preço Unitário (€)": 0.00} for _ in range(3)])
 tabela_materiais = st.data_editor(st.session_state.df_materiais, num_rows="dynamic", use_container_width=True)
 
 total_materiais = 0.0
 for index, row in tabela_materiais.iterrows():
     if str(row["Produto"]).strip() != "":
-        total_materiais += float(row["Quantidade"]) * float(row["Preço Unitário (EUR)"])
-st.markdown(f"<h4 style='text-align: right; color: #d9534f;'>Total: {total_materiais:.2f} EUR</h4>", unsafe_allow_html=True)
+        total_materiais += float(row["Quantidade"]) * float(row["Preço Unitário (€)"])
+
+st.markdown(f"<h4 style='text-align: right; color: #d9534f;'>Total: {total_materiais:.2f} €</h4>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: right; color: gray; font-size: 12px;'>* Não inclui IVA. A todos os valores acrescentar a taxa legal em vigor.</p>", unsafe_allow_html=True)
 st.divider()
 
 st.markdown("### 6. Tarefas Realizadas e Observações Detalhadas")
@@ -109,7 +143,7 @@ tarefas = st.text_area("Descreva os trabalhos executados")
 st.divider()
 
 st.markdown("### 7. Assinatura do Cliente")
-st.caption("Assine dentro do quadro abaixo.")
+st.caption("Assine dentro do quadro abaixo (Opcional).")
 canvas_result = st_canvas(
     fill_color="rgba(255, 255, 255, 1)", stroke_width=2, stroke_color="#000000",
     background_color="#f8f9fa", height=200, width=400, drawing_mode="freedraw", key="canvas"
@@ -134,6 +168,22 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
         "estado": "Pendente"
     }
     
+    # Tratar a imagem da assinatura
+    assinou = False
+    assinatura_buffer = None
+    if canvas_result.json_data is not None and len(canvas_result.json_data.get("objects", [])) > 0:
+        assinou = True
+        try:
+            img_data = canvas_result.image_data
+            pil_img = PILImage.fromarray(img_data.astype('uint8'), 'RGBA')
+            bg = PILImage.new("RGB", pil_img.size, (255,255,255))
+            bg.paste(pil_img, mask=pil_img.split()[3])
+            assinatura_buffer = io.BytesIO()
+            bg.save(assinatura_buffer, format="PNG")
+            assinatura_buffer.seek(0)
+        except Exception:
+            assinou = False
+
     # 1. Guardar no Supabase
     try:
         supabase.table("folhas_obra").insert(dados_obra).execute()
@@ -142,7 +192,7 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
         st.error(f"Erro ao guardar na base de dados: {err}")
 
     # 2. Gerar PDF
-    buffer_pdf = gerar_pdf_obra(dados_obra)
+    buffer_pdf = gerar_pdf_obra(dados_obra, assinatura_buffer, assinou)
     nome_ficheiro = f"FO_{cliente.replace(' ', '_') if cliente.strip() else 'Sem_Nome'}.pdf"
     
     # 3. Enviar PDF por Email Automático
@@ -176,10 +226,8 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
             servidor.quit()
             
             st.success("Email com o PDF enviado com sucesso para service@lissistemas.pt!")
-        else:
-            st.warning("A obra foi guardada, mas as configurações de email estão incompletas nos Secrets.")
-    except Exception as e:
-        st.warning("A obra foi guardada, mas ocorreu um erro ao enviar o email. Verifica as credenciais nos Secrets.")
+    except Exception:
+        st.warning("A obra foi guardada, mas ocorreu um erro ao enviar o email automático. Verifica as credenciais nos Secrets.")
 
     # 4. Botão de Download Manual
     st.download_button(
@@ -208,7 +256,9 @@ if len(obras) > 0:
         obra_sel = opcoes[escolha]
         id_obra = obra_sel['id']
         
-        meu_pdf_gerado = gerar_pdf_obra(obra_sel)
+        # Como no histórico não temos a imagem da assinatura capturada no momento, assume "não assinou" 
+        # (mas o texto base continua a mostrar o nome do técnico e detalhes corretos)
+        meu_pdf_gerado = gerar_pdf_obra(obra_sel, None, False)
         
         with st.expander(f"Ver Detalhes da Obra #{id_obra}", expanded=True):
             col_info, col_acoes = st.columns([2, 1])
