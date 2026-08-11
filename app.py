@@ -15,7 +15,7 @@ from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
@@ -31,56 +31,148 @@ try:
 except Exception as e:
     st.error("Erro de ligação à Base de Dados. Verifica os Secrets.")
 
-# --- 2. FUNÇÃO PARA GERAR O PDF PROFISSIONAL ---
+# --- 2. FUNÇÃO PARA GERAR O PDF PROFISSIONAL COM LOGÓTIPO ---
 def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=35,
+        leftMargin=35,
+        topMargin=35,
+        bottomMargin=35
+    )
     elementos = []
     
+    # Estilos de Texto do ReportLab
     estilos = getSampleStyleSheet()
-    estilo_titulo = ParagraphStyle('Titulo', fontName='Helvetica-Bold', fontSize=18, spaceAfter=25)
-    estilo_normal = ParagraphStyle('Normal', fontName='Helvetica', fontSize=12, spaceAfter=8, leading=16)
-    estilo_bold = ParagraphStyle('Negrito', fontName='Helvetica-Bold', fontSize=12, spaceAfter=8, leading=16)
-    estilo_destaque = ParagraphStyle('Destaque', fontName='Helvetica-Bold', fontSize=14, textColor=colors.firebrick, spaceAfter=5)
-    estilo_disclaimer = ParagraphStyle('Disclaimer', fontName='Helvetica-Oblique', fontSize=10, textColor=colors.dimgrey, spaceAfter=25)
+    estilo_titulo = ParagraphStyle('Titulo', fontName='Helvetica-Bold', fontSize=15, leading=18, textColor=colors.HexColor("#0F172A"))
+    estilo_normal = ParagraphStyle('Normal', fontName='Helvetica', fontSize=10, leading=14, textColor=colors.HexColor("#334155"))
+    estilo_bold = ParagraphStyle('Negrito', fontName='Helvetica-Bold', fontSize=10, leading=14, textColor=colors.HexColor("#0F172A"))
+    estilo_total = ParagraphStyle('Total', fontName='Helvetica-Bold', fontSize=12, leading=16, textColor=colors.HexColor("#DC2626"))
+    estilo_disclaimer = ParagraphStyle('Disclaimer', fontName='Helvetica-Oblique', fontSize=8, leading=11, textColor=colors.HexColor("#64748B"))
+
+    # 1. Cabeçalho com Logótipo
+    logo_cell = ""
+    if os.path.exists("logo.png"):
+        try:
+            logo_cell = RLImage("logo.png", width=130, height=50)
+        except Exception:
+            logo_cell = Paragraph("<b>LIS SISTEMAS</b>", estilo_titulo)
+    else:
+        logo_cell = Paragraph("<b>LIS SISTEMAS</b>", estilo_titulo)
+
+    header_text = Paragraph("<b>FOLHA DE OBRA DIGITAL</b><br/><font size=9 color='#64748B'>LIS SISTEMAS, LDA</font>", estilo_titulo)
     
-    # Cabeçalho
-    elementos.append(Paragraph("LIS SISTEMAS, LDA - FOLHA DE OBRA", estilo_titulo))
+    tabela_header = Table([[logo_cell, header_text]], colWidths=[200, 320])
+    tabela_header.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('ALIGN', (1,0), (1,0), 'RIGHT'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+    ]))
+    elementos.append(tabela_header)
+    elementos.append(Spacer(1, 10))
+
+    # Função Auxiliar para Criar Barras de Secção
+    def criar_cabecalho_seccao(texto):
+        p = Paragraph(f"<b>{texto.upper()}</b>", ParagraphStyle('SecBar', fontName='Helvetica-Bold', fontSize=9, textColor=colors.white))
+        t = Table([[p]], colWidths=[520])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#1E293B")),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ('LEFTPADDING', (0,0), (-1,-1), 8),
+        ]))
+        return t
+
+    # 2. Dados do Cliente
+    elementos.append(criar_cabecalho_seccao("1. Dados do Cliente & Serviço"))
+    elementos.append(Spacer(1, 6))
     
-    # Dados Principais
-    elementos.append(Paragraph(f"<b>Cliente / Empresa:</b> {dados.get('cliente', '')} | <b>Responsável:</b> {dados.get('nome_contacto', '')}", estilo_normal))
-    elementos.append(Paragraph(f"<b>Email:</b> {dados.get('email', '')} | <b>Serviço:</b> {dados.get('tipo_servico', '')}", estilo_normal))
+    dados_cliente = [
+        [Paragraph(f"<b>Cliente / Empresa:</b> {dados.get('cliente', '')}", estilo_normal), Paragraph(f"<b>Responsável:</b> {dados.get('nome_contacto', '')}", estilo_normal)],
+        [Paragraph(f"<b>Email:</b> {dados.get('email', '')}", estilo_normal), Paragraph(f"<b>Tipo de Serviço:</b> {dados.get('tipo_servico', '')}", estilo_normal)],
+    ]
+    t_cliente = Table(dados_cliente, colWidths=[260, 260])
+    t_cliente.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+    ]))
+    elementos.append(t_cliente)
+    elementos.append(Spacer(1, 10))
+
+    # 3. Intervenção e Tempos
+    elementos.append(criar_cabecalho_seccao("2. Intervenção e Tempos"))
+    elementos.append(Spacer(1, 6))
+    
+    dados_intervencao = [
+        [Paragraph(f"<b>Técnico Responsável:</b> {dados.get('tecnico', '')}", estilo_normal), Paragraph(f"<b>Horário:</b> {dados.get('hora_inicio', '')} às {dados.get('hora_fim', '')}", estilo_normal)],
+        [Paragraph(f"<b>Deslocação:</b> {dados.get('deslocacao', 0)} Km", estilo_normal), Paragraph("", estilo_normal)]
+    ]
+    t_intervencao = Table(dados_intervencao, colWidths=[260, 260])
+    t_intervencao.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+    ]))
+    elementos.append(t_intervencao)
+    elementos.append(Spacer(1, 10))
+
+    # 4. Descrição e Trabalhos
+    elementos.append(criar_cabecalho_seccao("3. Descrição do Pedido e Trabalhos Executados"))
+    elementos.append(Spacer(1, 6))
+    
+    elementos.append(Paragraph("<b>Descrição da Avaria / Pedido Inicial:</b>", estilo_bold))
+    elementos.append(Paragraph(f"{dados.get('descricao', '') or 'N/A'}", estilo_normal))
+    elementos.append(Spacer(1, 8))
+    elementos.append(Paragraph("<b>Tarefas Realizadas e Observações:</b>", estilo_bold))
+    elementos.append(Paragraph(f"{dados.get('tarefas', '') or 'N/A'}", estilo_normal))
+    elementos.append(Spacer(1, 12))
+
+    # 5. Resumo Financeiro
+    elementos.append(criar_cabecalho_seccao("4. Resumo de Materiais"))
+    elementos.append(Spacer(1, 6))
+    
+    total_val = float(dados.get('total_materiais', 0.0))
+    p_total = Paragraph(f"<b>Total de Materiais Aplicados:</b> {total_val:.2f} EUR", estilo_total)
+    p_disc = Paragraph("* Não inclui IVA. A todos os valores acrescentar a taxa legal em vigor.", estilo_disclaimer)
+    
+    t_totais = Table([[p_total], [p_disc]], colWidths=[520])
+    t_totais.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F8FAFC")),
+        ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor("#E2E8F0")),
+        ('PADDING', (0,0), (-1,-1), 8),
+    ]))
+    elementos.append(t_totais)
     elementos.append(Spacer(1, 15))
+
+    # 6. Assinatura e Validação
+    elementos.append(criar_cabecalho_seccao("5. Conformidade e Assinatura"))
+    elementos.append(Spacer(1, 8))
     
-    # Intervenção
-    elementos.append(Paragraph(f"<b>Técnico:</b> {dados.get('tecnico', '')} | <b>Horário:</b> {dados.get('hora_inicio', '')} às {dados.get('hora_fim', '')}", estilo_normal))
-    elementos.append(Paragraph(f"<b>Deslocação:</b> {dados.get('deslocacao', 0)} Km", estilo_normal))
-    elementos.append(Spacer(1, 20))
-    
-    # Descrições
-    elementos.append(Paragraph("<b>Descrição da Avaria / Pedido inicial:</b>", estilo_bold))
-    elementos.append(Paragraph(f"{dados.get('descricao', '')}", estilo_normal))
-    elementos.append(Spacer(1, 15))
-    
-    elementos.append(Paragraph("<b>Tarefas Realizadas:</b>", estilo_bold))
-    elementos.append(Paragraph(f"{dados.get('tarefas', '')}", estilo_normal))
-    elementos.append(Spacer(1, 20))
-    
-    # Totais e Disclaimer
-    elementos.append(Paragraph(f"<b>Total de Materiais Aplicados:</b> {dados.get('total_materiais', 0):.2f} EUR", estilo_destaque))
-    elementos.append(Paragraph("* Não inclui IVA. A todos os valores acrescentar a taxa legal em vigor.", estilo_disclaimer))
-    
-    # Zona de Assinaturas
-    elementos.append(Paragraph("<b>Data da folha de obra:</b> _____ / _____ / _________", estilo_normal))
-    elementos.append(Spacer(1, 15))
+    p_decl = Paragraph("Ao assinar, declaro que o serviço acima descrito foi realizado e dou conformidade à quantidade de horas e materiais registados.", estilo_disclaimer)
+    elementos.append(p_decl)
+    elementos.append(Spacer(1, 10))
+
+    data_str = datetime.date.today().strftime('%d / %m / %Y')
+    p_data = Paragraph(f"<b>Data da Folha de Obra:</b><br/>{data_str}", estilo_normal)
     
     if assinou and assinatura_buffer:
-        elementos.append(Paragraph("<b>Assinatura do Cliente:</b>", estilo_normal))
-        elementos.append(RLImage(assinatura_buffer, width=200, height=100))
+        img_ass = RLImage(assinatura_buffer, width=170, height=65)
+        t_ass = Table([[p_data, img_ass]], colWidths=[260, 260])
+        t_ass.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ]))
+        elementos.append(t_ass)
     else:
-        elementos.append(Spacer(1, 10))
-        elementos.append(Paragraph("<b>Assinatura:</b> ____________________________________________________", estilo_normal))
-    
+        p_linha = Paragraph("<b>Assinatura do Cliente:</b><br/><br/>________________________________________", estilo_normal)
+        t_ass = Table([[p_data, p_linha]], colWidths=[260, 260])
+        t_ass.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ]))
+        elementos.append(t_ass)
+
     doc.build(elementos)
     buffer.seek(0)
     return buffer
@@ -299,7 +391,7 @@ if len(obras) > 0:
                     st.warning("Obra apagada com sucesso!")
                     st.rerun()
 
-            # FORMULÁRIO DE EDIÇÃO EM LARGURA TOTAL (FORA DA COLUNA LATERAL)
+            # FORMULÁRIO DE EDIÇÃO EM LARGURA TOTAL
             st.divider()
             with st.expander("Editar Todos os Dados desta Obra", expanded=False):
                 ecol1, ecol2 = st.columns(2)
