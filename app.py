@@ -500,23 +500,27 @@ if len(obras_todas) > 0:
                     st.caption(f"Total recalculado dos materiais: {edit_total_mat:.2f} €")
 
                     st.markdown("**Editar Assinatura:**")
-                    st.caption("Assine no quadro abaixo apenas se desejar alterar ou adicionar uma nova assinatura.")
-                    edit_canvas_result = st_canvas(
-                        fill_color="rgba(255, 255, 255, 1)",
-                        stroke_width=2,
-                        stroke_color="#000000",
-                        background_color="#ffffff",
-                        height=180,
-                        width=380,
-                        drawing_mode="freedraw",
-                        key=f"edit_canvas_{id_obra}",
-                        update_streamlit=True,
-                        display_toolbar=True
-                    )
+                    ativar_assinatura = st.checkbox("Substituir / Adicionar Assinatura", key=f"chk_ass_{id_obra}")
+                    
+                    edit_canvas_result = None
+                    if ativar_assinatura:
+                        st.caption("Assine no quadro abaixo:")
+                        edit_canvas_result = st_canvas(
+                            fill_color="rgba(255, 255, 255, 1)",
+                            stroke_width=2,
+                            stroke_color="#000000",
+                            background_color="#ffffff",
+                            height=180,
+                            width=380,
+                            drawing_mode="freedraw",
+                            key=f"edit_canvas_{id_obra}",
+                            update_streamlit=True,
+                            display_toolbar=True
+                        )
 
                     if st.button("Guardar Alterações da Obra", key=f"btn_save_{id_obra}", type="primary", use_container_width=True):
                         nova_ass_b64 = obra_sel.get('assinatura', '')
-                        if edit_canvas_result.json_data is not None and len(edit_canvas_result.json_data.get("objects", [])) > 0:
+                        if ativar_assinatura and edit_canvas_result is not None and edit_canvas_result.json_data is not None and len(edit_canvas_result.json_data.get("objects", [])) > 0:
                             try:
                                 img_d = edit_canvas_result.image_data
                                 p_img = PILImage.fromarray(img_d.astype('uint8'), 'RGBA')
