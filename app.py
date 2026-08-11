@@ -144,7 +144,7 @@ canvas_result = st_canvas(
     fill_color="rgba(255, 255, 255, 1)", stroke_width=2, stroke_color="#000000",
     background_color="#f8f9fa", height=200, width=400, drawing_mode="freedraw", key="canvas"
 )
-st.info("Ao assinar, declaro que o serviço acima descrito foi realizado a meu inteiro agrado e dou conformidade à quantidade de horas e materiais registados.")
+st.info("Ao assinar, declaro que o serviço acima descrito foi realizado e dou conformidade à quantidade de horas e materiais registados.")
 st.divider()
 
 # --- BOTÃO DE CONCLUIR ---
@@ -253,11 +253,13 @@ if len(obras) > 0:
         
         meu_pdf_gerado = gerar_pdf_obra(obra_sel, None, False)
         
-        with st.expander(f"Ver Detalhes da Obra #{id_obra}", expanded=True):
+        with st.expander(f"Ver Detalhes e Gerir Obra #{id_obra}", expanded=True):
             col_info, col_acoes = st.columns([2, 1])
             
             with col_info:
                 st.write(f"**Data:** {obra_sel['created_at'][:10]}")
+                st.write(f"**Cliente / Empresa:** {obra_sel.get('cliente', '')}")
+                st.write(f"**Responsável:** {obra_sel.get('nome_contacto', '')}")
                 st.write(f"**Técnico:** {obra_sel['tecnico']}")
                 st.write(f"**Serviço:** {obra_sel['tipo_servico']}")
                 st.write(f"**Descrição/Avaria:** {obra_sel['descricao']}")
@@ -285,37 +287,10 @@ if len(obras) > 0:
                     index=["Pendente", "Concluído", "Faturado", "Cancelado"].index(obra_sel['estado']) if obra_sel['estado'] in ["Pendente", "Concluído", "Faturado", "Cancelado"] else 0,
                     key=f"estado_{id_obra}"
                 )
-                if st.button("Guardar Novo Estado", type="primary"):
+                if st.button("Guardar Novo Estado", type="primary", key=f"btn_st_{id_obra}"):
                     supabase.table("folhas_obra").update({"estado": novo_estado}).eq("id", id_obra).execute()
                     st.success("Estado atualizado!")
                     st.rerun() 
-
-                st.markdown("---")
-                st.markdown("**Modo de Edição**")
-                with st.expander("Editar Dados desta Obra"):
-                    edit_cliente = st.text_input("Cliente / Empresa", value=obra_sel.get('cliente', ''), key=f"edit_cli_{id_obra}")
-                    edit_resp = st.text_input("Responsável", value=obra_sel.get('nome_contacto', ''), key=f"edit_resp_{id_obra}")
-                    edit_email = st.text_input("Email", value=obra_sel.get('email', ''), key=f"edit_email_{id_obra}")
-                    edit_servico = st.selectbox("Tipo de Serviço", ["Assistência", "Instalação"], index=["Assistência", "Instalação"].index(obra_sel.get('tipo_servico', 'Assistência')) if obra_sel.get('tipo_servico') in ["Assistência", "Instalação"] else 0, key=f"edit_serv_{id_obra}")
-                    edit_tec = st.text_input("Técnico", value=obra_sel.get('tecnico', ''), key=f"edit_tec_{id_obra}")
-                    edit_desc = st.text_area("Descrição da avaria", value=obra_sel.get('descricao', ''), key=f"edit_desc_{id_obra}")
-                    edit_tar = st.text_area("Trabalhos executados", value=obra_sel.get('tarefas', ''), key=f"edit_tar_{id_obra}")
-                    edit_mat = st.number_input("Total de Materiais (€)", value=float(obra_sel.get('total_materiais', 0.0)), step=0.5, key=f"edit_mat_{id_obra}")
-                    
-                    if st.button("Guardar Alterações da Obra", key=f"btn_save_{id_obra}", type="primary"):
-                        dados_editados = {
-                            "cliente": edit_cliente,
-                            "nome_contacto": edit_resp,
-                            "email": edit_email,
-                            "tipo_servico": edit_servico,
-                            "tecnico": edit_tec,
-                            "descricao": edit_desc,
-                            "tarefas": edit_tar,
-                            "total_materiais": float(edit_mat)
-                        }
-                        supabase.table("folhas_obra").update(dados_editados).eq("id", id_obra).execute()
-                        st.success("Obra atualizada com sucesso!")
-                        st.rerun()
 
                 st.markdown("---")
                 st.markdown("**Apagar Registo**")
@@ -323,6 +298,42 @@ if len(obras) > 0:
                     supabase.table("folhas_obra").delete().eq("id", id_obra).execute()
                     st.warning("Obra apagada com sucesso!")
                     st.rerun()
+
+            # FORMULÁRIO DE EDIÇÃO EM LARGURA TOTAL (FORA DA COLUNA LATERAL)
+            st.divider()
+            with st.expander("Editar Todos os Dados desta Obra", expanded=False):
+                ecol1, ecol2 = st.columns(2)
+                with ecol1:
+                    edit_cliente = st.text_input("Cliente / Empresa", value=obra_sel.get('cliente', ''), key=f"edit_cli_{id_obra}")
+                    edit_email = st.text_input("Email", value=obra_sel.get('email', ''), key=f"edit_email_{id_obra}")
+                    edit_tec = st.text_input("Técnico", value=obra_sel.get('tecnico', ''), key=f"edit_tec_{id_obra}")
+                    edit_hi = st.text_input("Hora Início", value=str(obra_sel.get('hora_inicio', '09:00')), key=f"edit_hi_{id_obra}")
+                with ecol2:
+                    edit_resp = st.text_input("Responsável", value=obra_sel.get('nome_contacto', ''), key=f"edit_resp_{id_obra}")
+                    edit_servico = st.selectbox("Tipo de Serviço", ["Assistência", "Instalação"], index=["Assistência", "Instalação"].index(obra_sel.get('tipo_servico', 'Assistência')) if obra_sel.get('tipo_servico') in ["Assistência", "Instalação"] else 0, key=f"edit_serv_{id_obra}")
+                    edit_km = st.number_input("Deslocação (Km)", value=float(obra_sel.get('deslocacao', 0.0)), step=0.5, key=f"edit_km_{id_obra}")
+                    edit_hf = st.text_input("Hora Fim", value=str(obra_sel.get('hora_fim', '10:00')), key=f"edit_hf_{id_obra}")
+
+                edit_desc = st.text_area("Descrição da avaria", value=obra_sel.get('descricao', ''), key=f"edit_desc_{id_obra}")
+                edit_tar = st.text_area("Trabalhos executados", value=obra_sel.get('tarefas', ''), key=f"edit_tar_{id_obra}")
+                edit_mat = st.number_input("Total de Materiais (€)", value=float(obra_sel.get('total_materiais', 0.0)), step=0.5, key=f"edit_mat_{id_obra}")
+                
+                if st.button("Guardar Alterações da Obra", key=f"btn_save_{id_obra}", type="primary", use_container_width=True):
+                    dados_editados = {
+                        "cliente": edit_cliente,
+                        "nome_contacto": edit_resp,
+                        "email": edit_email,
+                        "tipo_servico": edit_servico,
+                        "tecnico": edit_tec,
+                        "hora_inicio": edit_hi,
+                        "hora_fim": edit_hf,
+                        "deslocacao": float(edit_km),
+                        "descricao": edit_desc,
+                        "tarefas": edit_tar,
+                        "total_materiais": float(edit_mat)
+                    }
+                    supabase.table("folhas_obra").update(dados_editados).eq("id", id_obra).execute()
+                    st.success("Obra atualizada com sucesso!")
+                    st.rerun()
 else:
     st.info("Ainda não existem obras na base de dados.")
-
