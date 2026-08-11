@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import io
+import json
 import datetime
 import base64
 from PIL import Image as PILImage
@@ -31,6 +32,14 @@ try:
 except Exception as e:
     st.error("Erro de ligação à Base de Dados. Verifica os Secrets.")
 
+def carregar_json_safe(texto_json, default_val):
+    if not texto_json:
+        return default_val
+    try:
+        return json.loads(texto_json)
+    except Exception:
+        return default_val
+
 # --- 2. FUNÇÃO PARA GERAR O PDF PROFISSIONAL COM LOGÓTIPO ---
 def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     buffer = io.BytesIO()
@@ -44,7 +53,6 @@ def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     )
     elementos = []
     
-    # Estilos de Texto do ReportLab
     estilos = getSampleStyleSheet()
     estilo_titulo = ParagraphStyle('Titulo', fontName='Helvetica-Bold', fontSize=15, leading=18, textColor=colors.HexColor("#0F172A"))
     estilo_normal = ParagraphStyle('Normal', fontName='Helvetica', fontSize=10, leading=14, textColor=colors.HexColor("#334155"))
@@ -73,7 +81,6 @@ def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     elementos.append(tabela_header)
     elementos.append(Spacer(1, 10))
 
-    # Função Auxiliar para Criar Barras de Secção
     def criar_cabecalho_seccao(texto):
         p = Paragraph(f"<b>{texto.upper()}</b>", ParagraphStyle('SecBar', fontName='Helvetica-Bold', fontSize=9, textColor=colors.white))
         t = Table([[p]], colWidths=[520])
@@ -241,6 +248,26 @@ st.divider()
 
 # --- BOTÃO DE CONCLUIR ---
 if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_width=True):
+    assinou = False
+    assinatura_buffer = None
+    assinatura_b64 = ""
+    if canvas_result.json_data is not None and len(canvas_result.json_data.get("objects", [])) > 0:
+        assinou = True
+        try:
+            img_data = canvas_result.image_data
+            pil_img = PILImage.fromarray(img_data.astype('uint8'), 'RGBA')
+            bg = PILImage.new("RGB", pil_img.size, (255,255,255))
+            bg.paste(pil_img, mask=pil_img.split()[3])
+            assinatura_buffer = io.BytesIO()
+            bg.save(assinatura_buffer, format="PNG")
+            assinatura_buffer.seek(0)
+            assinatura_b64 = base64.b64encode(assinatura_buffer.getvalue()).decode('utf-8')
+        except Exception:
+            assinou = False
+
+    prod_dict = tabela_produtos.to_dict('records')
+    mat_dict = tabela_materiais.to_dict('records')
+
     dados_obra = {
         "cliente": cliente,
         "email": email,
@@ -253,30 +280,26 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
         "deslocacao": float(deslocacao),
         "total_materiais": float(total_materiais),
         "tarefas": tarefas,
-        "estado": "Pendente"
+        "estado": "Pendente",
+        "produtos": json.dumps(prod_dict),
+        "materiais": json.dumps(mat_dict),
+        "assinatura": assinatura_b64
     }
-    
-    assinou = False
-    assinatura_buffer = None
-    if canvas_result.json_data is not None and len(canvas_result.json_data.get("objects", [])) > 0:
-        assinou = True
-        try:
-            img_data = canvas_result.image_data
-            pil_img = PILImage.fromarray(img_data.astype('uint8'), 'RGBA')
-            bg = PILImage.new("RGB", pil_img.size, (255,255,255))
-            bg.paste(pil_img, mask=pil_img.split()[3])
-            assinatura_buffer = io.BytesIO()
-            bg.save(assinatura_buffer, format="PNG")
-            assinatura_buffer.seek(0)
-        except Exception:
-            assinou = False
 
-    # 1. Guardar no Supabase
+    # 1. Guardar no Supabase (com fallback se colunas novas não existirem na tabela)
     try:
         supabase.table("folhas_obra").insert(dados_obra).execute()
         st.success("Obra guardada com sucesso na Base de Dados!")
     except Exception as err:
-        st.error(f"Erro ao guardar na base de dados: {err}")
+        if "column" in str(err).lower() or "schema" in str(err).lower() or "PGRST" in str(err):
+            dados_base = {k: v for k, v in dados_obra.items() if k not in ["produtos", "materiais", "assinatura"]}
+            try:
+                supabase.table("folhas_obra").insert(dados_base).execute()
+                st.success("Obra guardada com sucesso na Base de Dados!")
+            except Exception as err2:
+                st.error(f"Erro ao guardar na base de dados: {err2}")
+        else:
+            st.error(f"Erro ao guardar na base de dados: {err}")
 
     # 2. Gerar PDF
     buffer_pdf = gerar_pdf_obra(dados_obra, assinatura_buffer, assinou)
@@ -324,108 +347,196 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
         mime="application/pdf"
     )
 
-# --- 4. GESTÃO, EDIÇÃO E HISTÓRICO DE OBRAS (NO FUNDO DA PÁGINA) ---
+# --- 4. GESTÃO, EDIÇÃO E HISTÓRICO DE OBRAS ---
 st.divider()
 st.markdown("### Histórico de Obras Guardadas")
 
 try:
     resposta = supabase.table("folhas_obra").select("*").order("id", desc=True).execute()
-    obras = resposta.data
+    obras_todas = resposta.data
 except Exception as err:
     st.error(f"Erro ao carregar o histórico: {err}")
-    obras = []
+    obras_todas = []
 
-if len(obras) > 0:
-    opcoes = {f"Obra #{obra['id']} - {obra['cliente']} (Estado: {obra['estado']})": obra for obra in obras}
-    escolha = st.selectbox("Selecione uma obra para ver detalhes, editar ou apagar:", list(opcoes.keys()))
+if len(obras_todas) > 0:
+    st.markdown("**Filtros do Histórico**")
+    f_col1, f_col2 = st.columns(2)
+    
+    with f_col1:
+        clientes_unicos = ["Todos"] + sorted(list(set([o['cliente'] for o in obras_todas if o.get('cliente')])))
+        filtro_cliente = st.selectbox("Filtrar por Cliente:", clientes_unicos)
+        
+    with f_col2:
+        filtro_servico = st.selectbox("Filtrar por Tipo de Serviço:", ["Todos", "Assistência", "Instalação"])
 
-    if escolha:
-        obra_sel = opcoes[escolha]
-        id_obra = obra_sel['id']
-        
-        meu_pdf_gerado = gerar_pdf_obra(obra_sel, None, False)
-        
-        with st.expander(f"Ver Detalhes e Gerir Obra #{id_obra}", expanded=True):
-            col_info, col_acoes = st.columns([2, 1])
+    obras = obras_todas
+    if filtro_cliente != "Todos":
+        obras = [o for o in obras if o.get('cliente') == filtro_cliente]
+    if filtro_servico != "Todos":
+        obras = [o for o in obras if o.get('tipo_servico') == filtro_servico]
+
+    if len(obras) > 0:
+        opcoes = {f"Obra #{obra['id']} - {obra['cliente']} (Estado: {obra['estado']})": obra for obra in obras}
+        escolha = st.selectbox("Selecione uma obra para ver detalhes, editar ou apagar:", list(opcoes.keys()))
+
+        if escolha:
+            obra_sel = opcoes[escolha]
+            id_obra = obra_sel['id']
             
-            with col_info:
-                st.write(f"**Data:** {obra_sel['created_at'][:10]}")
-                st.write(f"**Cliente / Empresa:** {obra_sel.get('cliente', '')}")
-                st.write(f"**Responsável:** {obra_sel.get('nome_contacto', '')}")
-                st.write(f"**Técnico:** {obra_sel['tecnico']}")
-                st.write(f"**Serviço:** {obra_sel['tipo_servico']}")
-                st.write(f"**Descrição/Avaria:** {obra_sel['descricao']}")
-                st.write(f"**Tarefas Realizadas:** {obra_sel['tarefas']}")
-                st.write(f"**Total de Materiais:** {obra_sel['total_materiais']} EUR")
+            ass_b64 = obra_sel.get('assinatura')
+            ass_buf = None
+            tem_assinatura = False
+            if ass_b64:
+                try:
+                    ass_buf = io.BytesIO(base64.b64decode(ass_b64))
+                    tem_assinatura = True
+                except Exception:
+                    ass_buf = None
+                    tem_assinatura = False
+
+            meu_pdf_gerado = gerar_pdf_obra(obra_sel, ass_buf, tem_assinatura)
+            
+            with st.expander(f"Ver Detalhes e Gerir Obra #{id_obra}", expanded=True):
+                col_info, col_acoes = st.columns([2, 1])
                 
-                st.markdown("**Visualizar PDF:**")
-                base64_pdf = base64.b64encode(meu_pdf_gerado.getvalue()).decode('utf-8')
-                pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="400" type="application/pdf"></iframe>'
-                st.markdown(pdf_display, unsafe_allow_html=True)
-                
-                st.download_button(
-                    label="Descarregar Ficheiro PDF",
-                    data=meu_pdf_gerado,
-                    file_name=f"Folha_Obra_{obra_sel['id']}.pdf",
-                    mime="application/pdf",
-                    key=f"dl_pdf_{id_obra}"
-                )
+                with col_info:
+                    st.write(f"**Data:** {obra_sel['created_at'][:10]}")
+                    st.write(f"**Cliente / Empresa:** {obra_sel.get('cliente', '')}")
+                    st.write(f"**Responsável:** {obra_sel.get('nome_contacto', '')}")
+                    st.write(f"**Técnico:** {obra_sel['tecnico']}")
+                    st.write(f"**Serviço:** {obra_sel['tipo_servico']}")
+                    st.write(f"**Descrição/Avaria:** {obra_sel['descricao']}")
+                    st.write(f"**Tarefas Realizadas:** {obra_sel['tarefas']}")
+                    st.write(f"**Total de Materiais:** {obra_sel['total_materiais']} EUR")
+                    
+                    st.markdown("**Visualizar PDF:**")
+                    base64_pdf = base64.b64encode(meu_pdf_gerado.getvalue()).decode('utf-8')
+                    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="400" type="application/pdf"></iframe>'
+                    st.markdown(pdf_display, unsafe_allow_html=True)
+                    
+                    st.download_button(
+                        label="Descarregar Ficheiro PDF",
+                        data=meu_pdf_gerado,
+                        file_name=f"Folha_Obra_{obra_sel['id']}.pdf",
+                        mime="application/pdf",
+                        key=f"dl_pdf_{id_obra}"
+                    )
 
-            with col_acoes:
-                st.markdown("**Atualizar Estado**")
-                novo_estado = st.selectbox(
-                    "Mudar para:",
-                    ["Pendente", "Concluído", "Faturado", "Cancelado"],
-                    index=["Pendente", "Concluído", "Faturado", "Cancelado"].index(obra_sel['estado']) if obra_sel['estado'] in ["Pendente", "Concluído", "Faturado", "Cancelado"] else 0,
-                    key=f"estado_{id_obra}"
-                )
-                if st.button("Guardar Novo Estado", type="primary", key=f"btn_st_{id_obra}"):
-                    supabase.table("folhas_obra").update({"estado": novo_estado}).eq("id", id_obra).execute()
-                    st.success("Estado atualizado!")
-                    st.rerun() 
+                with col_acoes:
+                    st.markdown("**Atualizar Estado**")
+                    status_opcoes = ["Pendente", "Oferta", "Faturado", "Cancelado"]
+                    estado_atual = obra_sel.get('estado', 'Pendente')
+                    idx_st = status_opcoes.index(estado_atual) if estado_atual in status_opcoes else 0
+                    
+                    novo_estado = st.selectbox(
+                        "Mudar para:",
+                        status_opcoes,
+                        index=idx_st,
+                        key=f"estado_{id_obra}"
+                    )
+                    if st.button("Guardar Novo Estado", type="primary", key=f"btn_st_{id_obra}"):
+                        supabase.table("folhas_obra").update({"estado": novo_estado}).eq("id", id_obra).execute()
+                        st.success("Estado atualizado!")
+                        st.rerun() 
 
-                st.markdown("---")
-                st.markdown("**Apagar Registo**")
-                if st.button("Apagar Obra", key=f"del_{id_obra}"):
-                    supabase.table("folhas_obra").delete().eq("id", id_obra).execute()
-                    st.warning("Obra apagada com sucesso!")
-                    st.rerun()
+                    st.markdown("---")
+                    st.markdown("**Apagar Registo**")
+                    if st.button("Apagar Obra", key=f"del_{id_obra}"):
+                        supabase.table("folhas_obra").delete().eq("id", id_obra).execute()
+                        st.warning("Obra apagada com sucesso!")
+                        st.rerun()
 
-            # FORMULÁRIO DE EDIÇÃO EM LARGURA TOTAL
-            st.divider()
-            with st.expander("Editar Todos os Dados desta Obra", expanded=False):
-                ecol1, ecol2 = st.columns(2)
-                with ecol1:
-                    edit_cliente = st.text_input("Cliente / Empresa", value=obra_sel.get('cliente', ''), key=f"edit_cli_{id_obra}")
-                    edit_email = st.text_input("Email", value=obra_sel.get('email', ''), key=f"edit_email_{id_obra}")
-                    edit_tec = st.text_input("Técnico", value=obra_sel.get('tecnico', ''), key=f"edit_tec_{id_obra}")
-                    edit_hi = st.text_input("Hora Início", value=str(obra_sel.get('hora_inicio', '09:00')), key=f"edit_hi_{id_obra}")
-                with ecol2:
-                    edit_resp = st.text_input("Responsável", value=obra_sel.get('nome_contacto', ''), key=f"edit_resp_{id_obra}")
-                    edit_servico = st.selectbox("Tipo de Serviço", ["Assistência", "Instalação"], index=["Assistência", "Instalação"].index(obra_sel.get('tipo_servico', 'Assistência')) if obra_sel.get('tipo_servico') in ["Assistência", "Instalação"] else 0, key=f"edit_serv_{id_obra}")
-                    edit_km = st.number_input("Deslocação (Km)", value=float(obra_sel.get('deslocacao', 0.0)), step=0.5, key=f"edit_km_{id_obra}")
-                    edit_hf = st.text_input("Hora Fim", value=str(obra_sel.get('hora_fim', '10:00')), key=f"edit_hf_{id_obra}")
+                # FORMULÁRIO DE EDIÇÃO EM LARGURA TOTAL
+                st.divider()
+                with st.expander("Editar Todos os Dados desta Obra", expanded=False):
+                    ecol1, ecol2 = st.columns(2)
+                    with ecol1:
+                        edit_cliente = st.text_input("Cliente / Empresa", value=obra_sel.get('cliente', ''), key=f"edit_cli_{id_obra}")
+                        edit_email = st.text_input("Email", value=obra_sel.get('email', ''), key=f"edit_email_{id_obra}")
+                        edit_tec = st.text_input("Técnico", value=obra_sel.get('tecnico', ''), key=f"edit_tec_{id_obra}")
+                        edit_hi = st.text_input("Hora Início", value=str(obra_sel.get('hora_inicio', '09:00')), key=f"edit_hi_{id_obra}")
+                    with ecol2:
+                        edit_resp = st.text_input("Responsável", value=obra_sel.get('nome_contacto', ''), key=f"edit_resp_{id_obra}")
+                        edit_servico = st.selectbox("Tipo de Serviço", ["Assistência", "Instalação"], index=["Assistência", "Instalação"].index(obra_sel.get('tipo_servico', 'Assistência')) if obra_sel.get('tipo_servico') in ["Assistência", "Instalação"] else 0, key=f"edit_serv_{id_obra}")
+                        edit_km = st.number_input("Deslocação (Km)", value=float(obra_sel.get('deslocacao', 0.0)), step=0.5, key=f"edit_km_{id_obra}")
+                        edit_hf = st.text_input("Hora Fim", value=str(obra_sel.get('hora_fim', '10:00')), key=f"edit_hf_{id_obra}")
 
-                edit_desc = st.text_area("Descrição da avaria", value=obra_sel.get('descricao', ''), key=f"edit_desc_{id_obra}")
-                edit_tar = st.text_area("Trabalhos executados", value=obra_sel.get('tarefas', ''), key=f"edit_tar_{id_obra}")
-                edit_mat = st.number_input("Total de Materiais (€)", value=float(obra_sel.get('total_materiais', 0.0)), step=0.5, key=f"edit_mat_{id_obra}")
-                
-                if st.button("Guardar Alterações da Obra", key=f"btn_save_{id_obra}", type="primary", use_container_width=True):
-                    dados_editados = {
-                        "cliente": edit_cliente,
-                        "nome_contacto": edit_resp,
-                        "email": edit_email,
-                        "tipo_servico": edit_servico,
-                        "tecnico": edit_tec,
-                        "hora_inicio": edit_hi,
-                        "hora_fim": edit_hf,
-                        "deslocacao": float(edit_km),
-                        "descricao": edit_desc,
-                        "tarefas": edit_tar,
-                        "total_materiais": float(edit_mat)
-                    }
-                    supabase.table("folhas_obra").update(dados_editados).eq("id", id_obra).execute()
-                    st.success("Obra atualizada com sucesso!")
-                    st.rerun()
+                    edit_desc = st.text_area("Descrição da avaria", value=obra_sel.get('descricao', ''), key=f"edit_desc_{id_obra}")
+                    edit_tar = st.text_area("Trabalhos executados", value=obra_sel.get('tarefas', ''), key=f"edit_tar_{id_obra}")
+
+                    st.markdown("**Editar Produtos e Equipamentos:**")
+                    raw_prod = obra_sel.get('produtos')
+                    prod_list = carregar_json_safe(raw_prod, [{"Qtd": 1.0, "Descrição do Produto / Equipamento": ""} for _ in range(2)])
+                    edit_df_prod = pd.DataFrame(prod_list)
+                    edit_tab_prod = st.data_editor(edit_df_prod, num_rows="dynamic", use_container_width=True, key=f"edit_prod_editor_{id_obra}")
+
+                    st.markdown("**Editar Materiais Aplicados:**")
+                    raw_mat = obra_sel.get('materiais')
+                    mat_list = carregar_json_safe(raw_mat, [{"Quantidade": 1.0, "Produto": "", "Preço Unitário (€)": 0.00} for _ in range(3)])
+                    edit_df_mat = pd.DataFrame(mat_list)
+                    edit_tab_mat = st.data_editor(edit_df_mat, num_rows="dynamic", use_container_width=True, key=f"edit_mat_editor_{id_obra}")
+
+                    edit_total_mat = 0.0
+                    for idx, r in edit_tab_mat.iterrows():
+                        if str(r.get("Produto", "")).strip() != "":
+                            try:
+                                edit_total_mat += float(r.get("Quantidade", 0)) * float(r.get("Preço Unitário (€)", 0))
+                            except Exception:
+                                pass
+                    st.caption(f"Total recalculado dos materiais: {edit_total_mat:.2f} €")
+
+                    st.markdown("**Editar Assinatura:**")
+                    st.caption("Assine no quadro abaixo apenas se desejar alterar ou adicionar uma nova assinatura.")
+                    edit_canvas_result = st_canvas(
+                        fill_color="rgba(255, 255, 255, 1)", stroke_width=2, stroke_color="#000000",
+                        background_color="#f8f9fa", height=150, width=350, drawing_mode="freedraw", key=f"edit_canvas_{id_obra}"
+                    )
+
+                    if st.button("Guardar Alterações da Obra", key=f"btn_save_{id_obra}", type="primary", use_container_width=True):
+                        nova_ass_b64 = obra_sel.get('assinatura', '')
+                        if edit_canvas_result.json_data is not None and len(edit_canvas_result.json_data.get("objects", [])) > 0:
+                            try:
+                                img_d = edit_canvas_result.image_data
+                                p_img = PILImage.fromarray(img_d.astype('uint8'), 'RGBA')
+                                bg_img = PILImage.new("RGB", p_img.size, (255,255,255))
+                                bg_img.paste(p_img, mask=p_img.split()[3])
+                                b_buf = io.BytesIO()
+                                bg_img.save(b_buf, format="PNG")
+                                b_buf.seek(0)
+                                nova_ass_b64 = base64.b64encode(b_buf.getvalue()).decode('utf-8')
+                            except Exception:
+                                pass
+
+                        dados_editados = {
+                            "cliente": edit_cliente,
+                            "nome_contacto": edit_resp,
+                            "email": edit_email,
+                            "tipo_servico": edit_servico,
+                            "tecnico": edit_tec,
+                            "hora_inicio": edit_hi,
+                            "hora_fim": edit_hf,
+                            "deslocacao": float(edit_km),
+                            "descricao": edit_desc,
+                            "tarefas": edit_tar,
+                            "total_materiais": float(edit_total_mat),
+                            "produtos": json.dumps(edit_tab_prod.to_dict('records')),
+                            "materiais": json.dumps(edit_tab_mat.to_dict('records')),
+                            "assinatura": nova_ass_b64
+                        }
+
+                        try:
+                            supabase.table("folhas_obra").update(dados_editados).eq("id", id_obra).execute()
+                            st.success("Obra atualizada com sucesso!")
+                            st.rerun()
+                        except Exception as err:
+                            if "column" in str(err).lower() or "schema" in str(err).lower() or "PGRST" in str(err):
+                                dados_edit_base = {k: v for k, v in dados_editados.items() if k not in ["produtos", "materiais", "assinatura"]}
+                                supabase.table("folhas_obra").update(dados_edit_base).eq("id", id_obra).execute()
+                                st.success("Obra atualizada com sucesso!")
+                                st.rerun()
+                            else:
+                                st.error(f"Erro ao atualizar obra: {err}")
+    else:
+        st.info("Nenhuma obra encontrada com os filtros selecionados.")
 else:
     st.info("Ainda não existem obras na base de dados.")
