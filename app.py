@@ -4,7 +4,6 @@ import os
 import io
 import datetime
 import base64
-import numpy as np
 from PIL import Image as PILImage
 from streamlit_drawable_canvas import st_canvas
 from supabase import create_client, Client
@@ -38,7 +37,6 @@ def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
     elementos = []
     
-    # Estilos customizados (Letras maiores e mais visíveis)
     estilos = getSampleStyleSheet()
     estilo_titulo = ParagraphStyle('Titulo', fontName='Helvetica-Bold', fontSize=18, spaceAfter=25)
     estilo_normal = ParagraphStyle('Normal', fontName='Helvetica', fontSize=12, spaceAfter=8, leading=16)
@@ -105,7 +103,6 @@ with col2:
 st.divider()
 
 st.markdown("### 2. Produtos e Equipamentos")
-# O 1.0 garante que a coluna aceita números decimais
 if 'df_produtos' not in st.session_state:
     st.session_state.df_produtos = pd.DataFrame([{"Qtd": 1.0, "Descrição do Produto / Equipamento": ""} for _ in range(2)])
 tabela_produtos = st.data_editor(st.session_state.df_produtos, num_rows="dynamic", use_container_width=True)
@@ -124,7 +121,6 @@ deslocacao = col_km.number_input("Deslocação (Km)", min_value=0.0, step=0.5)
 st.divider()
 
 st.markdown("### 5. Materiais Aplicados")
-# O 1.0 e 0.00 garantem casas decimais nestas colunas também
 if 'df_materiais' not in st.session_state:
     st.session_state.df_materiais = pd.DataFrame([{"Quantidade": 1.0, "Produto": "", "Preço Unitário (€)": 0.00} for _ in range(3)])
 tabela_materiais = st.data_editor(st.session_state.df_materiais, num_rows="dynamic", use_container_width=True)
@@ -148,7 +144,7 @@ canvas_result = st_canvas(
     fill_color="rgba(255, 255, 255, 1)", stroke_width=2, stroke_color="#000000",
     background_color="#f8f9fa", height=200, width=400, drawing_mode="freedraw", key="canvas"
 )
-st.info("Ao assinar, declaro que os trabalhos acima descritos foram executados a meu inteiro agrado e dou conformidade à quantidade de horas e materiais registados.")
+st.info("Ao assinar, declaro que o serviço acima descrito foi realizado a meu inteiro agrado e dou conformidade à quantidade de horas e materiais registados.")
 st.divider()
 
 # --- BOTÃO DE CONCLUIR ---
@@ -168,7 +164,6 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
         "estado": "Pendente"
     }
     
-    # Tratar a imagem da assinatura
     assinou = False
     assinatura_buffer = None
     if canvas_result.json_data is not None and len(canvas_result.json_data.get("objects", [])) > 0:
@@ -237,7 +232,7 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
         mime="application/pdf"
     )
 
-# --- 4. GESTÃO E HISTÓRICO DE OBRAS (NO FUNDO DA PÁGINA) ---
+# --- 4. GESTÃO, EDIÇÃO E HISTÓRICO DE OBRAS (NO FUNDO DA PÁGINA) ---
 st.divider()
 st.markdown("### Histórico de Obras Guardadas")
 
@@ -256,8 +251,6 @@ if len(obras) > 0:
         obra_sel = opcoes[escolha]
         id_obra = obra_sel['id']
         
-        # Como no histórico não temos a imagem da assinatura capturada no momento, assume "não assinou" 
-        # (mas o texto base continua a mostrar o nome do técnico e detalhes corretos)
         meu_pdf_gerado = gerar_pdf_obra(obra_sel, None, False)
         
         with st.expander(f"Ver Detalhes da Obra #{id_obra}", expanded=True):
@@ -297,8 +290,36 @@ if len(obras) > 0:
                     st.success("Estado atualizado!")
                     st.rerun() 
 
+                st.markdown("---")
+                st.markdown("**Modo de Edição**")
+                with st.expander("Editar Dados desta Obra"):
+                    edit_cliente = st.text_input("Cliente / Empresa", value=obra_sel.get('cliente', ''), key=f"edit_cli_{id_obra}")
+                    edit_resp = st.text_input("Responsável", value=obra_sel.get('nome_contacto', ''), key=f"edit_resp_{id_obra}")
+                    edit_email = st.text_input("Email", value=obra_sel.get('email', ''), key=f"edit_email_{id_obra}")
+                    edit_servico = st.selectbox("Tipo de Serviço", ["Assistência", "Instalação"], index=["Assistência", "Instalação"].index(obra_sel.get('tipo_servico', 'Assistência')) if obra_sel.get('tipo_servico') in ["Assistência", "Instalação"] else 0, key=f"edit_serv_{id_obra}")
+                    edit_tec = st.text_input("Técnico", value=obra_sel.get('tecnico', ''), key=f"edit_tec_{id_obra}")
+                    edit_desc = st.text_area("Descrição da avaria", value=obra_sel.get('descricao', ''), key=f"edit_desc_{id_obra}")
+                    edit_tar = st.text_area("Trabalhos executados", value=obra_sel.get('tarefas', ''), key=f"edit_tar_{id_obra}")
+                    edit_mat = st.number_input("Total de Materiais (€)", value=float(obra_sel.get('total_materiais', 0.0)), step=0.5, key=f"edit_mat_{id_obra}")
+                    
+                    if st.button("Guardar Alterações da Obra", key=f"btn_save_{id_obra}", type="primary"):
+                        dados_editados = {
+                            "cliente": edit_cliente,
+                            "nome_contacto": edit_resp,
+                            "email": edit_email,
+                            "tipo_servico": edit_servico,
+                            "tecnico": edit_tec,
+                            "descricao": edit_desc,
+                            "tarefas": edit_tar,
+                            "total_materiais": float(edit_mat)
+                        }
+                        supabase.table("folhas_obra").update(dados_editados).eq("id", id_obra).execute()
+                        st.success("Obra atualizada com sucesso!")
+                        st.rerun()
+
+                st.markdown("---")
                 st.markdown("**Apagar Registo**")
-                if st.button("Apagar Obra"):
+                if st.button("Apagar Obra", key=f"del_{id_obra}"):
                     supabase.table("folhas_obra").delete().eq("id", id_obra).execute()
                     st.warning("Obra apagada com sucesso!")
                     st.rerun()
