@@ -53,6 +53,7 @@ def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     )
     elementos = []
     
+    # Estilos de Texto do ReportLab
     estilos = getSampleStyleSheet()
     estilo_titulo = ParagraphStyle('Titulo', fontName='Helvetica-Bold', fontSize=15, leading=18, textColor=colors.HexColor("#0F172A"))
     estilo_normal = ParagraphStyle('Normal', fontName='Helvetica', fontSize=10, leading=14, textColor=colors.HexColor("#334155"))
@@ -240,8 +241,16 @@ st.divider()
 st.markdown("### 7. Assinatura do Cliente")
 st.caption("Assine dentro do quadro abaixo (Opcional).")
 canvas_result = st_canvas(
-    fill_color="rgba(255, 255, 255, 1)", stroke_width=2, stroke_color="#000000",
-    background_color="#f8f9fa", height=200, width=400, drawing_mode="freedraw", key="canvas"
+    fill_color="rgba(255, 255, 255, 1)",
+    stroke_width=2,
+    stroke_color="#000000",
+    background_color="#ffffff",
+    height=180,
+    width=380,
+    drawing_mode="freedraw",
+    key="canvas_principal",
+    update_streamlit=True,
+    display_toolbar=True
 )
 st.info("Com a assinatura do presente documento, valido o descrito nesta folha de obra e declaro a conformidade das horas e dos materiais registados.")
 st.divider()
@@ -286,7 +295,7 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
         "assinatura": assinatura_b64
     }
 
-    # 1. Guardar no Supabase (com fallback se colunas novas não existirem na tabela)
+    # 1. Guardar no Supabase
     try:
         supabase.table("folhas_obra").insert(dados_obra).execute()
         st.success("Obra guardada com sucesso na Base de Dados!")
@@ -360,20 +369,25 @@ except Exception as err:
 
 if len(obras_todas) > 0:
     st.markdown("**Filtros do Histórico**")
-    f_col1, f_col2 = st.columns(2)
+    f_col1, f_col2, f_col3 = st.columns(3)
     
     with f_col1:
         clientes_unicos = ["Todos"] + sorted(list(set([o['cliente'] for o in obras_todas if o.get('cliente')])))
         filtro_cliente = st.selectbox("Filtrar por Cliente:", clientes_unicos)
         
     with f_col2:
-        filtro_servico = st.selectbox("Filtrar por Tipo de Serviço:", ["Todos", "Assistência", "Instalação"])
+        filtro_servico = st.selectbox("Filtrar por Serviço:", ["Todos", "Assistência", "Instalação"])
+
+    with f_col3:
+        filtro_estado = st.selectbox("Filtrar por Estado:", ["Todos", "Pendente", "Oferta", "Faturado", "Cancelado"])
 
     obras = obras_todas
     if filtro_cliente != "Todos":
         obras = [o for o in obras if o.get('cliente') == filtro_cliente]
     if filtro_servico != "Todos":
         obras = [o for o in obras if o.get('tipo_servico') == filtro_servico]
+    if filtro_estado != "Todos":
+        obras = [o for o in obras if o.get('estado') == filtro_estado]
 
     if len(obras) > 0:
         opcoes = {f"Obra #{obra['id']} - {obra['cliente']} (Estado: {obra['estado']})": obra for obra in obras}
@@ -488,8 +502,16 @@ if len(obras_todas) > 0:
                     st.markdown("**Editar Assinatura:**")
                     st.caption("Assine no quadro abaixo apenas se desejar alterar ou adicionar uma nova assinatura.")
                     edit_canvas_result = st_canvas(
-                        fill_color="rgba(255, 255, 255, 1)", stroke_width=2, stroke_color="#000000",
-                        background_color="#f8f9fa", height=150, width=350, drawing_mode="freedraw", key=f"edit_canvas_{id_obra}"
+                        fill_color="rgba(255, 255, 255, 1)",
+                        stroke_width=2,
+                        stroke_color="#000000",
+                        background_color="#ffffff",
+                        height=180,
+                        width=380,
+                        drawing_mode="freedraw",
+                        key=f"edit_canvas_{id_obra}",
+                        update_streamlit=True,
+                        display_toolbar=True
                     )
 
                     if st.button("Guardar Alterações da Obra", key=f"btn_save_{id_obra}", type="primary", use_container_width=True):
