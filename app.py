@@ -7,7 +7,12 @@ import base64
 from streamlit_drawable_canvas import st_canvas
 from supabase import create_client, Client
 
-# Bibliotecas para PDF
+# Bibliotecas para Email e PDF
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email.mime.text import MIMEText
+from email import encoders
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
@@ -52,7 +57,7 @@ def gerar_pdf_obra(dados):
     buffer.seek(0)
     return buffer
 
-# --- 3. LAYOUT PRINCIPAL (O ORIGINAL DAS IMAGENS) ---
+# --- 3. LAYOUT PRINCIPAL DO FORMULÁRIO ---
 if os.path.exists("logo.png"):
     st.image("logo.png", width=200)
 
@@ -89,14 +94,14 @@ st.divider()
 
 st.markdown("### 5. Materiais Aplicados")
 if 'df_materiais' not in st.session_state:
-    st.session_state.df_materiais = pd.DataFrame([{"Quantidade": 1, "Produto": "", "Preço Unitário (€)": 0.00} for _ in range(3)])
+    st.session_state.df_materiais = pd.DataFrame([{"Quantidade": 1, "Produto": "", "Preço Unitário (EUR)": 0.00} for _ in range(3)])
 tabela_materiais = st.data_editor(st.session_state.df_materiais, num_rows="dynamic", use_container_width=True)
 
 total_materiais = 0.0
 for index, row in tabela_materiais.iterrows():
     if str(row["Produto"]).strip() != "":
-        total_materiais += float(row["Quantidade"]) * float(row["Preço Unitário (€)"])
-st.markdown(f"<h4 style='text-align: right; color: #d9534f;'>Total: {total_materiais:.2f} €</h4>", unsafe_allow_html=True)
+        total_materiais += float(row["Quantidade"]) * float(row["Preço Unitário (EUR)"])
+st.markdown(f"<h4 style='text-align: right; color: #d9534f;'>Total: {total_materiais:.2f} EUR</h4>", unsafe_allow_html=True)
 st.divider()
 
 st.markdown("### 6. Tarefas Realizadas e Observações Detalhadas")
@@ -140,6 +145,43 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
     buffer_pdf = gerar_pdf_obra(dados_obra)
     nome_ficheiro = f"FO_{cliente.replace(' ', '_') if cliente.strip() else 'Sem_Nome'}.pdf"
     
+    # 3. Enviar PDF por Email Automático
+    try:
+        remetente = st.secrets.get("EMAIL_REMETENTE")
+        password = st.secrets.get("EMAIL_PASSWORD")
+        servidor_smtp = st.secrets.get("SMTP_SERVER")
+        porta_smtp = int(st.secrets.get("SMTP_PORT", 587))
+        
+        if remetente and password and servidor_smtp:
+            destinatario = "service@lissistemas.pt"
+            
+            msg = MIMEMultipart()
+            msg['From'] = remetente
+            msg['To'] = destinatario
+            msg['Subject'] = f"Nova Folha de Obra Concluída: {cliente}"
+            
+            corpo_email = f"A folha de obra do cliente {cliente} foi concluída pelo técnico {tecnico}.\n\nO ficheiro PDF segue em anexo."
+            msg.attach(MIMEText(corpo_email, 'plain'))
+            
+            anexo = MIMEBase('application', 'octet-stream')
+            anexo.set_payload(buffer_pdf.getvalue())
+            encoders.encode_base64(anexo)
+            anexo.add_header('Content-Disposition', f'attachment; filename="{nome_ficheiro}"')
+            msg.attach(anexo)
+            
+            servidor = smtplib.SMTP(servidor_smtp, porta_smtp)
+            servidor.starttls()
+            servidor.login(remetente, password)
+            servidor.send_message(msg)
+            servidor.quit()
+            
+            st.success("Email com o PDF enviado com sucesso para service@lissistemas.pt!")
+        else:
+            st.warning("A obra foi guardada, mas as configurações de email estão incompletas nos Secrets.")
+    except Exception as e:
+        st.warning("A obra foi guardada, mas ocorreu um erro ao enviar o email. Verifica as credenciais nos Secrets.")
+
+    # 4. Botão de Download Manual
     st.download_button(
         label="DESCARREGAR PDF",
         data=buffer_pdf,
@@ -212,3 +254,4 @@ if len(obras) > 0:
                     st.rerun()
 else:
     st.info("Ainda não existem obras na base de dados.")
+
