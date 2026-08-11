@@ -151,7 +151,7 @@ def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     elementos.append(criar_cabecalho_seccao("5. Conformidade e Assinatura"))
     elementos.append(Spacer(1, 8))
     
-    p_decl = Paragraph("Ao assinar, declaro que o serviço acima descrito foi realizado e dou conformidade à quantidade de horas e materiais registados.", estilo_disclaimer)
+    p_decl = Paragraph("Com a assinatura do presente documento, valido a execução dos serviços e declaro a conformidade das horas e dos materiais registados.", estilo_disclaimer)
     elementos.append(p_decl)
     elementos.append(Spacer(1, 10))
 
@@ -236,7 +236,7 @@ canvas_result = st_canvas(
     fill_color="rgba(255, 255, 255, 1)", stroke_width=2, stroke_color="#000000",
     background_color="#f8f9fa", height=200, width=400, drawing_mode="freedraw", key="canvas"
 )
-st.info("Ao assinar, declaro que o serviço acima descrito foi realizado e dou conformidade à quantidade de horas e materiais registados.")
+st.info("Com a assinatura do presente documento, valido a execução dos serviços e declaro a conformidade das horas e dos materiais registados.")
 st.divider()
 
 # --- BOTÃO DE CONCLUIR ---
