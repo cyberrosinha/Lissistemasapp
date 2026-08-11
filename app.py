@@ -17,7 +17,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA E BASE DE DADOS ---
-st.set_page_config(page_title="LIS SISTEMAS - Gestão de Obras", layout="centered", page_icon="🔧")
+st.set_page_config(page_title="LIS SISTEMAS - Gestão de Obras", layout="centered")
 
 @st.cache_resource
 def init_supabase():
@@ -26,10 +26,9 @@ def init_supabase():
 try:
     supabase: Client = init_supabase()
 except Exception as e:
-    st.error("⚠️ Erro de ligação à Base de Dados. Verifica os Secrets.")
+    st.error("Erro de ligação à Base de Dados. Verifica os Secrets.")
 
 # --- 2. FUNÇÃO MESTRA PARA GERAR O PDF ---
-# Usamos isto tanto para a criação nova como para ver o histórico!
 def gerar_pdf_obra(dados):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
@@ -51,17 +50,16 @@ def gerar_pdf_obra(dados):
     elementos.append(Paragraph("<b>Tarefas Realizadas:</b>", estilos['Normal']))
     elementos.append(Paragraph(f"{dados.get('tarefas', '')}", estilos['Normal']))
     elementos.append(Spacer(1, 15))
-    elementos.append(Paragraph(f"<b>Total de Materiais:</b> {dados.get('total_materiais', 0)} €", estilos['Heading3']))
+    elementos.append(Paragraph(f"<b>Total de Materiais:</b> {dados.get('total_materiais', 0)} EUR", estilos['Heading3']))
     
     doc.build(elementos)
     buffer.seek(0)
     return buffer
 
-
 st.title("Gestão de Obras - LIS SISTEMAS")
 
 # --- 3. CRIAR OS SEPARADORES (TABS) ---
-tab_nova, tab_gestao = st.tabs(["📝 Nova Folha de Obra", "🗄️ Painel de Gestão (Histórico)"])
+tab_nova, tab_gestao = st.tabs(["Nova Folha de Obra", "Painel de Gestão (Histórico)"])
 
 # ==========================================
 # TAB 1: NOVA FOLHA DE OBRA (Para o Técnico)
@@ -87,12 +85,12 @@ with tab_nova:
     
     st.markdown("### 3. Materiais e Trabalhos")
     tarefas = st.text_area("Trabalhos executados")
-    total_materiais = st.number_input("Valor Total de Materiais Aplicados (€)", min_value=0.0, step=0.5)
+    total_materiais = st.number_input("Valor Total de Materiais Aplicados (EUR)", min_value=0.0, step=0.5)
     
     st.markdown("### 4. Assinatura do Cliente")
     st_canvas(fill_color="rgba(255, 255, 255, 1)", stroke_width=2, background_color="#f8f9fa", height=150, width=400, key="canvas")
 
-    if st.button("🚀 CONCLUIR, GRAVAR E ENVIAR EMAIL", type="primary", use_container_width=True):
+    if st.button("CONCLUIR, GRAVAR E ENVIAR EMAIL", type="primary", use_container_width=True):
         dados_obra = {
             "cliente": cliente, "email": email, "nome_contacto": nome_contacto,
             "tipo_servico": tipo_servico, "descricao": descricao, "tecnico": tecnico,
@@ -104,7 +102,7 @@ with tab_nova:
         # 1. Guardar no Supabase
         try:
             supabase.table("folhas_obra").insert(dados_obra).execute()
-            st.success("✅ Obra guardada na Base de Dados!")
+            st.success("Obra guardada na Base de Dados!")
         except Exception as e:
             st.error(f"Erro na base de dados: {e}")
 
@@ -136,12 +134,11 @@ with tab_nova:
                 servidor.login(remetente, password)
                 servidor.send_message(msg)
                 servidor.quit()
-                st.success("📧 Email enviado para o escritório!")
+                st.success("Email enviado para o escritório!")
         except Exception as e:
             st.warning("A obra foi guardada, mas ocorreu um erro a enviar o email (verifica os Secrets).")
             
-        st.download_button("📄 DESCARREGAR PDF DA OBRA AGORA", data=buffer_pdf, file_name=nome_ficheiro, mime="application/pdf")
-
+        st.download_button("DESCARREGAR PDF DA OBRA AGORA", data=buffer_pdf, file_name=nome_ficheiro, mime="application/pdf")
 
 # ==========================================
 # TAB 2: PAINEL DE GESTÃO (Histórico)
@@ -175,14 +172,14 @@ with tab_gestao:
                 st.write(f"**Técnico:** {obra_sel['tecnico']} | **Serviço:** {obra_sel['tipo_servico']}")
                 st.write(f"**Data de Criação:** {obra_sel['created_at'][:10]}")
                 
-                with st.expander("👁️ VISUALIZAR PDF DESTA OBRA"):
-                    # Magia para mostrar o PDF diretamente dentro da página
+                with st.expander("VISUALIZAR PDF DESTA OBRA"):
+                    # Mostrar o PDF diretamente dentro da página
                     base64_pdf = base64.b64encode(meu_pdf_gerado.getvalue()).decode('utf-8')
                     pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="500" type="application/pdf"></iframe>'
                     st.markdown(pdf_display, unsafe_allow_html=True)
                     
                     st.download_button(
-                        label="📥 Descarregar Ficheiro",
+                        label="Descarregar Ficheiro",
                         data=meu_pdf_gerado,
                         file_name=f"Folha_Obra_{obra_sel['id']}.pdf",
                         mime="application/pdf"
@@ -198,7 +195,7 @@ with tab_gestao:
                     ["Pendente", "Concluído", "Faturado", "Cancelado"],
                     index=["Pendente", "Concluído", "Faturado", "Cancelado"].index(obra_sel['estado']) if obra_sel['estado'] in ["Pendente", "Concluído", "Faturado", "Cancelado"] else 0
                 )
-                if st.button("💾 Guardar Estado", use_container_width=True):
+                if st.button("Guardar Estado", use_container_width=True):
                     supabase.table("folhas_obra").update({"estado": novo_estado}).eq("id", id_obra).execute()
                     st.success("Estado alterado!")
                     st.rerun()
@@ -206,9 +203,9 @@ with tab_gestao:
                 st.divider()
                 
                 # Apagar Registo
-                if st.button("🗑️ Apagar Obra", use_container_width=True):
+                if st.button("Apagar Obra", use_container_width=True):
                     supabase.table("folhas_obra").delete().eq("id", id_obra).execute()
                     st.warning("Obra eliminada para sempre!")
                     st.rerun()
     else:
-        st.info("Ainda não existem obras na base de dados."))
+        st.info("Ainda não existem obras na base de dados.")
