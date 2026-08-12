@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import io
 import json
+import ast
 import datetime
 import base64
 from PIL import Image as PILImage
@@ -32,27 +33,20 @@ try:
 except Exception as e:
     st.error("Erro de ligação à Base de Dados. Verifica os Secrets.")
 
-def carregar_json_safe(dados, default_val):
-    if not dados:
+def carregar_json_safe(texto, default_val):
+    if not texto:
         return default_val
-    
-    # 1. Se o Supabase já converteu automaticamente para lista ou dicionário (JSONB)
-    if isinstance(dados, (list, dict)):
-        if isinstance(dados, list) and len(dados) == 0:
-            return default_val
-        return dados
-        
-    # 2. Se vier como texto (TEXT/VARCHAR)
-    if isinstance(dados, str):
+    if isinstance(texto, list):
+        return texto
+    try:
+        # Tenta carregar como JSON padrão
+        return json.loads(texto)
+    except Exception:
         try:
-            parsed = json.loads(dados)
-            if isinstance(parsed, list) and len(parsed) == 0:
-                return default_val
-            return parsed
+            # Tenta avaliar caso o formato guardado seja uma representação em string do Python (o tal bug)
+            return ast.literal_eval(texto)
         except Exception:
             return default_val
-            
-    return default_val
 
 # --- 2. FUNÇÃO PARA GERAR O PDF PROFISSIONAL COM LOGÓTIPO ---
 def gerar_pdf_obra(dados, assinatura_buffer, assinou):
@@ -85,7 +79,8 @@ def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     else:
         logo_cell = Paragraph("<b>LIS SISTEMAS</b>", estilo_titulo)
 
-    header_text = Paragraph("<b>FOLHA DE OBRA</b><br/><font size=9 color='#64748B'>LIS SISTEMAS, LDA</font>", estilo_titulo)
+    # REMOVIDO: O texto "LIS SISTEMAS, LDA" por baixo de Folha de Obra e a palavra "Digital"
+    header_text = Paragraph("<b>FOLHA DE OBRA</b>", estilo_titulo)
     
     tabela_header = Table([[logo_cell, header_text]], colWidths=[200, 320])
     tabela_header.setStyle(TableStyle([
@@ -223,6 +218,7 @@ custom_header = f"""
     <h1 style="margin: 0; padding: 0; font-size: 2.2rem; font-weight: 700; color: #0f172a; line-height: 1;">Folha de Obra</h1>
 </div>
 """
+# Renderiza a estrutura na página
 st.markdown(custom_header, unsafe_allow_html=True)
 
 st.divider()
@@ -330,16 +326,17 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
         "assinatura": assinatura_b64
     }
 
-    # 1. Guardar no Supabase
+    # 1. Guardar no Supabase (COM AVISOS CASO AS COLUNAS NÃO EXISTAM)
     try:
         supabase.table("folhas_obra").insert(dados_obra).execute()
         st.success("Obra guardada com sucesso na Base de Dados!")
     except Exception as err:
-        if "column" in str(err).lower() or "schema" in str(err).lower() or "PGRST" in str(err):
+        if "column" in str(err).lower() or "schema" in str(err).lower() or "pgrst" in str(err).lower():
+            st.warning("⚠️ Aviso: As colunas 'produtos', 'materiais' ou 'assinatura' não foram encontradas no teu Supabase! A gravar apenas os dados básicos...")
             dados_base = {k: v for k, v in dados_obra.items() if k not in ["produtos", "materiais", "assinatura"]}
             try:
                 supabase.table("folhas_obra").insert(dados_base).execute()
-                st.success("Obra guardada com sucesso na Base de Dados!")
+                st.success("Obra guardada (sem as tabelas/assinaturas) com sucesso!")
             except Exception as err2:
                 st.error(f"Erro ao guardar na base de dados: {err2}")
         else:
@@ -585,15 +582,17 @@ if len(obras_todas) > 0:
                             "assinatura": nova_ass_b64
                         }
 
+                        # Edição Supabase (COM AVISOS CASO AS COLUNAS NÃO EXISTAM)
                         try:
                             supabase.table("folhas_obra").update(dados_editados).eq("id", id_obra).execute()
                             st.success("Obra atualizada com sucesso!")
                             st.rerun()
                         except Exception as err:
-                            if "column" in str(err).lower() or "schema" in str(err).lower() or "PGRST" in str(err):
+                            if "column" in str(err).lower() or "schema" in str(err).lower() or "pgrst" in str(err).lower():
+                                st.warning("⚠️ Aviso: Faltam colunas na Base de Dados. A guardar apenas os dados básicos...")
                                 dados_edit_base = {k: v for k, v in dados_editados.items() if k not in ["produtos", "materiais", "assinatura"]}
                                 supabase.table("folhas_obra").update(dados_edit_base).eq("id", id_obra).execute()
-                                st.success("Obra atualizada com sucesso!")
+                                st.success("Obra atualizada (sem as tabelas/assinatura) com sucesso!")
                                 st.rerun()
                             else:
                                 st.error(f"Erro ao atualizar obra: {err}")
