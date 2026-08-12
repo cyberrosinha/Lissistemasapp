@@ -32,13 +32,27 @@ try:
 except Exception as e:
     st.error("Erro de ligação à Base de Dados. Verifica os Secrets.")
 
-def carregar_json_safe(texto_json, default_val):
-    if not texto_json:
+def carregar_json_safe(dados, default_val):
+    if not dados:
         return default_val
-    try:
-        return json.loads(texto_json)
-    except Exception:
-        return default_val
+    
+    # 1. Se o Supabase já converteu automaticamente para lista ou dicionário (JSONB)
+    if isinstance(dados, (list, dict)):
+        if isinstance(dados, list) and len(dados) == 0:
+            return default_val
+        return dados
+        
+    # 2. Se vier como texto (TEXT/VARCHAR)
+    if isinstance(dados, str):
+        try:
+            parsed = json.loads(dados)
+            if isinstance(parsed, list) and len(parsed) == 0:
+                return default_val
+            return parsed
+        except Exception:
+            return default_val
+            
+    return default_val
 
 # --- 2. FUNÇÃO PARA GERAR O PDF PROFISSIONAL COM LOGÓTIPO ---
 def gerar_pdf_obra(dados, assinatura_buffer, assinou):
@@ -71,7 +85,6 @@ def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     else:
         logo_cell = Paragraph("<b>LIS SISTEMAS</b>", estilo_titulo)
 
-    # Removida a palavra "Digital" do PDF também
     header_text = Paragraph("<b>FOLHA DE OBRA</b><br/><font size=9 color='#64748B'>LIS SISTEMAS, LDA</font>", estilo_titulo)
     
     tabela_header = Table([[logo_cell, header_text]], colWidths=[200, 320])
@@ -191,12 +204,10 @@ def gerar_pdf_obra(dados, assinatura_buffer, assinou):
 # Construção do cabeçalho em linha (Logótipo à esquerda + Texto à direita)
 img_html = ""
 if os.path.exists("logo.png"):
-    # Se tiveres o logo.png, injetamos a imagem diretamente no HTML para ficar na mesma linha
     with open("logo.png", "rb") as f:
         logo_b64 = base64.b64encode(f.read()).decode()
     img_html = f'<img src="data:image/png;base64,{logo_b64}" style="max-height: 55px; margin-right: 20px; object-fit: contain;" />'
 else:
-    # Caso o logo.png não exista, mostra um ícone profissional à mesma
     img_html = '''<div style="display: flex; align-items: center; justify-content: center; width: 50px; height: 50px; background: linear-gradient(135deg, #1e293b, #0f172a); color: white; border-radius: 10px; margin-right: 20px; flex-shrink: 0;">
         <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
@@ -212,7 +223,6 @@ custom_header = f"""
     <h1 style="margin: 0; padding: 0; font-size: 2.2rem; font-weight: 700; color: #0f172a; line-height: 1;">Folha de Obra</h1>
 </div>
 """
-# Renderiza a estrutura na página
 st.markdown(custom_header, unsafe_allow_html=True)
 
 st.divider()
