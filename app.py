@@ -189,7 +189,54 @@ def gerar_pdf_obra(dados, assinatura_buffer, assinou):
 if os.path.exists("logo.png"):
     st.image("logo.png", width=200)
 
-st.title("Folha de Obra Digital")
+# CABEÇALHO PERSONALIZADO HTML/CSS (SUBSTITUI O st.title ORIGINAL)
+custom_header = """
+<style>
+  .header-container {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 24px;
+    background-color: transparent;
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    border-radius: 12px;
+    width: 100%;
+    margin-bottom: 2rem;
+  }
+
+  .logo-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    background: linear-gradient(135deg, #1e293b, #0f172a);
+    color: #ffffff;
+    border-radius: 10px;
+  }
+
+  .header-title {
+    margin: 0 !important;
+    font-size: 1.8rem !important;
+    font-weight: 700 !important;
+    padding: 0 !important;
+  }
+</style>
+
+<div class="header-container">
+  <div class="logo-icon">
+    <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+      <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+      <path d="M9 12h6"></path>
+      <path d="M9 16h6"></path>
+    </svg>
+  </div>
+  <h1 class="header-title">Folha de Obra</h1>
+</div>
+"""
+st.markdown(custom_header, unsafe_allow_html=True)
+
 st.divider()
 
 st.markdown("### 1. Dados do Cliente")
