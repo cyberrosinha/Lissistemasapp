@@ -39,16 +39,14 @@ def carregar_json_safe(texto, default_val):
     if isinstance(texto, list):
         return texto
     try:
-        # Tenta carregar como JSON padrão
         return json.loads(texto)
     except Exception:
         try:
-            # Tenta avaliar caso o formato guardado seja uma representação em string do Python (o tal bug)
             return ast.literal_eval(texto)
         except Exception:
             return default_val
 
-# --- 2. FUNÇÃO PARA GERAR O PDF PROFISSIONAL COM LOGÓTIPO ---
+# --- 2. FUNÇÃO PARA GERAR O PDF PROFISSIONAL COM LOGÓTIPO E TABELAS ---
 def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -79,7 +77,6 @@ def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     else:
         logo_cell = Paragraph("<b>LIS SISTEMAS</b>", estilo_titulo)
 
-    # REMOVIDO: O texto "LIS SISTEMAS, LDA" por baixo de Folha de Obra e a palavra "Digital"
     header_text = Paragraph("<b>FOLHA DE OBRA</b>", estilo_titulo)
     
     tabela_header = Table([[logo_cell, header_text]], colWidths=[200, 320])
@@ -147,8 +144,84 @@ def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     elementos.append(Paragraph(f"{dados.get('tarefas', '') or 'N/A'}", estilo_normal))
     elementos.append(Spacer(1, 12))
 
-    # 5. Resumo Financeiro
-    elementos.append(criar_cabecalho_seccao("4. Resumo de Materiais"))
+    # VARIÁVEL PARA GERIR A NUMERAÇÃO DAS SECÇÕES DINAMICAMENTE
+    sec_num = 4
+
+    # 5. TABELA DE PRODUTOS E EQUIPAMENTOS
+    produtos_list = carregar_json_safe(dados.get('produtos'), [])
+    produtos_validos = [p for p in produtos_list if str(p.get("Descrição do Produto / Equipamento", "")).strip() != ""]
+
+    if produtos_validos:
+        elementos.append(criar_cabecalho_seccao(f"{sec_num}. Produtos e Equipamentos"))
+        elementos.append(Spacer(1, 6))
+        
+        t_data_prod = [[Paragraph("<b>Qtd</b>", estilo_bold), Paragraph("<b>Descrição do Produto / Equipamento</b>", estilo_bold)]]
+        for p in produtos_validos:
+            qtd = str(p.get("Qtd", "1"))
+            desc = str(p.get("Descrição do Produto / Equipamento", ""))
+            t_data_prod.append([Paragraph(qtd, estilo_normal), Paragraph(desc, estilo_normal)])
+            
+        t_prod = Table(t_data_prod, colWidths=[50, 470])
+        t_prod.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#F1F5F9")),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2E8F0")),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ALIGN', (0,0), (0,-1), 'CENTER'),
+            ('PADDING', (0,0), (-1,-1), 6),
+        ]))
+        elementos.append(t_prod)
+        elementos.append(Spacer(1, 12))
+        sec_num += 1
+
+    # 6. TABELA DE MATERIAIS APLICADOS
+    materiais_list = carregar_json_safe(dados.get('materiais'), [])
+    materiais_validos = [m for m in materiais_list if str(m.get("Produto", "")).strip() != ""]
+
+    if materiais_validos:
+        elementos.append(criar_cabecalho_seccao(f"{sec_num}. Materiais Aplicados"))
+        elementos.append(Spacer(1, 6))
+        
+        t_data_mat = [[
+            Paragraph("<b>Qtd</b>", estilo_bold), 
+            Paragraph("<b>Produto</b>", estilo_bold),
+            Paragraph("<b>Preço Unit.</b>", estilo_bold),
+            Paragraph("<b>Total</b>", estilo_bold)
+        ]]
+        
+        for m in materiais_validos:
+            try:
+                qtd = float(m.get("Quantidade", 0))
+            except:
+                qtd = 0.0
+            prod = str(m.get("Produto", ""))
+            try:
+                preco = float(m.get("Preço Unitário (€)", 0))
+            except:
+                preco = 0.0
+            subtotal = qtd * preco
+            
+            t_data_mat.append([
+                Paragraph(f"{qtd:g}", estilo_normal),
+                Paragraph(prod, estilo_normal),
+                Paragraph(f"{preco:.2f} €", estilo_normal),
+                Paragraph(f"{subtotal:.2f} €", estilo_normal)
+            ])
+            
+        t_mat = Table(t_data_mat, colWidths=[50, 310, 80, 80])
+        t_mat.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#F1F5F9")),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2E8F0")),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ALIGN', (0,0), (0,-1), 'CENTER'),
+            ('ALIGN', (2,0), (-1,-1), 'RIGHT'),
+            ('PADDING', (0,0), (-1,-1), 6),
+        ]))
+        elementos.append(t_mat)
+        elementos.append(Spacer(1, 12))
+        sec_num += 1
+
+    # 7. Resumo Financeiro
+    elementos.append(criar_cabecalho_seccao(f"{sec_num}. Resumo de Materiais"))
     elementos.append(Spacer(1, 6))
     
     total_val = float(dados.get('total_materiais', 0.0))
@@ -163,9 +236,10 @@ def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     ]))
     elementos.append(t_totais)
     elementos.append(Spacer(1, 15))
+    sec_num += 1
 
-    # 6. Assinatura e Validação
-    elementos.append(criar_cabecalho_seccao("5. Conformidade e Assinatura"))
+    # 8. Assinatura e Validação
+    elementos.append(criar_cabecalho_seccao(f"{sec_num}. Conformidade e Assinatura"))
     elementos.append(Spacer(1, 8))
     
     p_decl = Paragraph("Com a assinatura do presente documento, valido o descrito nesta folha de obra e declaro a conformidade das horas e dos materiais registados.", estilo_disclaimer)
@@ -259,7 +333,10 @@ tabela_materiais = st.data_editor(st.session_state.df_materiais, num_rows="dynam
 total_materiais = 0.0
 for index, row in tabela_materiais.iterrows():
     if str(row["Produto"]).strip() != "":
-        total_materiais += float(row["Quantidade"]) * float(row["Preço Unitário (€)"])
+        try:
+            total_materiais += float(row["Quantidade"]) * float(row["Preço Unitário (€)"])
+        except:
+            pass
 
 st.markdown(f"<h4 style='text-align: right; color: #d9534f;'>Total: {total_materiais:.2f} €</h4>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: right; color: gray; font-size: 12px;'>* Não inclui IVA. A todos os valores acrescentar a taxa legal em vigor.</p>", unsafe_allow_html=True)
@@ -326,7 +403,7 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
         "assinatura": assinatura_b64
     }
 
-    # 1. Guardar no Supabase (COM AVISOS CASO AS COLUNAS NÃO EXISTAM)
+    # 1. Guardar no Supabase
     try:
         supabase.table("folhas_obra").insert(dados_obra).execute()
         st.success("Obra guardada com sucesso na Base de Dados!")
