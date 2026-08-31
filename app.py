@@ -46,6 +46,42 @@ def carregar_json_safe(texto, default_val):
         except Exception:
             return default_val
 
+# --- FUNÇÃO PARA ENVIAR O PDF POR EMAIL ---
+def enviar_email_pdf(cliente, tecnico, buffer_pdf, nome_ficheiro):
+    try:
+        remetente = st.secrets.get("EMAIL_REMETENTE")
+        password = st.secrets.get("EMAIL_PASSWORD")
+        servidor_smtp = st.secrets.get("SMTP_SERVER")
+        porta_smtp = int(st.secrets.get("SMTP_PORT", 587))
+        
+        if remetente and password and servidor_smtp:
+            destinatario = "service@lissistemas.pt"
+            
+            msg = MIMEMultipart()
+            msg['From'] = remetente
+            msg['To'] = destinatario
+            msg['Subject'] = f"Folha de Obra: {cliente}"
+            
+            corpo_email = f"A folha de obra do cliente {cliente} foi registada/atualizada pelo técnico {tecnico}.\n\nO ficheiro PDF segue em anexo."
+            msg.attach(MIMEText(corpo_email, 'plain'))
+            
+            anexo = MIMEBase('application', 'octet-stream')
+            anexo.set_payload(buffer_pdf.getvalue())
+            encoders.encode_base64(anexo)
+            anexo.add_header('Content-Disposition', f'attachment; filename="{nome_ficheiro}"')
+            msg.attach(anexo)
+            
+            servidor = smtplib.SMTP(servidor_smtp, porta_smtp)
+            servidor.starttls()
+            servidor.login(remetente, password)
+            servidor.send_message(msg)
+            servidor.quit()
+            
+            return True, "Email com o PDF enviado com sucesso para service@lissistemas.pt!"
+        return False, "Faltam as credenciais de Email nos Secrets."
+    except Exception as e:
+        return False, f"Ocorreu um erro ao enviar o email: {str(e)}"
+
 # --- 2. FUNÇÃO PARA GERAR O PDF PROFISSIONAL COM LOGÓTIPO E TABELAS ---
 def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     buffer = io.BytesIO()
@@ -144,7 +180,6 @@ def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     elementos.append(Paragraph(f"{dados.get('tarefas', '') or 'N/A'}", estilo_normal))
     elementos.append(Spacer(1, 12))
 
-    # VARIÁVEL PARA GERIR A NUMERAÇÃO DAS SECÇÕES DINAMICAMENTE
     sec_num = 4
 
     # 5. TABELA DE PRODUTOS E EQUIPAMENTOS
@@ -292,7 +327,6 @@ custom_header = f"""
     <h1 style="margin: 0; padding: 0; font-size: 2.2rem; font-weight: 700; color: #0f172a; line-height: 1;">Folha de Obra</h1>
 </div>
 """
-# Renderiza a estrutura na página
 st.markdown(custom_header, unsafe_allow_html=True)
 
 st.divider()
@@ -423,39 +457,12 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
     buffer_pdf = gerar_pdf_obra(dados_obra, assinatura_buffer, assinou)
     nome_ficheiro = f"FO_{cliente.replace(' ', '_') if cliente.strip() else 'Sem_Nome'}.pdf"
     
-    # 3. Enviar PDF por Email Automático
-    try:
-        remetente = st.secrets.get("EMAIL_REMETENTE")
-        password = st.secrets.get("EMAIL_PASSWORD")
-        servidor_smtp = st.secrets.get("SMTP_SERVER")
-        porta_smtp = int(st.secrets.get("SMTP_PORT", 587))
-        
-        if remetente and password and servidor_smtp:
-            destinatario = "service@lissistemas.pt"
-            
-            msg = MIMEMultipart()
-            msg['From'] = remetente
-            msg['To'] = destinatario
-            msg['Subject'] = f"Nova Folha de Obra Concluída: {cliente}"
-            
-            corpo_email = f"A folha de obra do cliente {cliente} foi concluída pelo técnico {tecnico}.\n\nO ficheiro PDF segue em anexo."
-            msg.attach(MIMEText(corpo_email, 'plain'))
-            
-            anexo = MIMEBase('application', 'octet-stream')
-            anexo.set_payload(buffer_pdf.getvalue())
-            encoders.encode_base64(anexo)
-            anexo.add_header('Content-Disposition', f'attachment; filename="{nome_ficheiro}"')
-            msg.attach(anexo)
-            
-            servidor = smtplib.SMTP(servidor_smtp, porta_smtp)
-            servidor.starttls()
-            servidor.login(remetente, password)
-            servidor.send_message(msg)
-            servidor.quit()
-            
-            st.success("Email com o PDF enviado com sucesso para service@lissistemas.pt!")
-    except Exception:
-        st.warning("A obra foi guardada, mas ocorreu um erro ao enviar o email automático. Verifica as credenciais nos Secrets.")
+    # 3. Enviar PDF por Email (Usando a nova função)
+    sucesso, msg_email = enviar_email_pdf(cliente, tecnico, buffer_pdf, nome_ficheiro)
+    if sucesso:
+        st.success(msg_email)
+    else:
+        st.warning(msg_email)
 
     # 4. Botão de Download Manual
     st.download_button(
@@ -546,6 +553,19 @@ if len(obras_todas) > 0:
                     )
 
                 with col_acoes:
+                    st.markdown("**Ações Rápidas**")
+                    
+                    # --- NOVO BOTÃO PARA REENVIAR EMAIL APÓS EDIÇÃO ---
+                    if st.button("📧 Reenviar PDF por Email", key=f"btn_reenviar_{id_obra}", use_container_width=True):
+                        nome_f = f"FO_{obra_sel.get('cliente', 'Sem_Nome').replace(' ', '_')}.pdf"
+                        sucesso_envio, msg_envio = enviar_email_pdf(obra_sel.get('cliente', ''), obra_sel.get('tecnico', ''), meu_pdf_gerado, nome_f)
+                        if sucesso_envio:
+                            st.success(msg_envio)
+                        else:
+                            st.error(msg_envio)
+                            
+                    st.markdown("---")
+                    
                     st.markdown("**Atualizar Estado**")
                     status_opcoes = ["Pendente", "Oferta", "Faturado", "Cancelado"]
                     estado_atual = obra_sel.get('estado', 'Pendente')
@@ -557,14 +577,14 @@ if len(obras_todas) > 0:
                         index=idx_st,
                         key=f"estado_{id_obra}"
                     )
-                    if st.button("Guardar Novo Estado", type="primary", key=f"btn_st_{id_obra}"):
+                    if st.button("Guardar Novo Estado", type="primary", key=f"btn_st_{id_obra}", use_container_width=True):
                         supabase.table("folhas_obra").update({"estado": novo_estado}).eq("id", id_obra).execute()
                         st.success("Estado atualizado!")
                         st.rerun() 
 
                     st.markdown("---")
                     st.markdown("**Apagar Registo**")
-                    if st.button("Apagar Obra", key=f"del_{id_obra}"):
+                    if st.button("Apagar Obra", key=f"del_{id_obra}", use_container_width=True):
                         supabase.table("folhas_obra").delete().eq("id", id_obra).execute()
                         st.warning("Obra apagada com sucesso!")
                         st.rerun()
