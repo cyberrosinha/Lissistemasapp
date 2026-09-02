@@ -47,7 +47,7 @@ def carregar_json_safe(texto, default_val):
             return default_val
 
 # --- FUNÇÃO PARA ENVIAR O PDF POR EMAIL ---
-def enviar_email_pdf(cliente, tecnico, buffer_pdf, nome_ficheiro):
+def enviar_email_pdf(cliente, tecnico, buffer_pdf, nome_ficheiro, destinatario="service@lissistemas.pt"):
     try:
         remetente = st.secrets.get("EMAIL_REMETENTE")
         password = st.secrets.get("EMAIL_PASSWORD")
@@ -55,8 +55,6 @@ def enviar_email_pdf(cliente, tecnico, buffer_pdf, nome_ficheiro):
         porta_smtp = int(st.secrets.get("SMTP_PORT", 587))
         
         if remetente and password and servidor_smtp:
-            destinatario = "service@lissistemas.pt"
-            
             msg = MIMEMultipart()
             msg['From'] = remetente
             msg['To'] = destinatario
@@ -77,7 +75,7 @@ def enviar_email_pdf(cliente, tecnico, buffer_pdf, nome_ficheiro):
             servidor.send_message(msg)
             servidor.quit()
             
-            return True, "Email com o PDF enviado com sucesso para service@lissistemas.pt!"
+            return True, f"Email enviado com sucesso para {destinatario}!"
         return False, "Faltam as credenciais de Email nos Secrets."
     except Exception as e:
         return False, f"Ocorreu um erro ao enviar o email: {str(e)}"
@@ -457,7 +455,7 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
     buffer_pdf = gerar_pdf_obra(dados_obra, assinatura_buffer, assinou)
     nome_ficheiro = f"FO_{cliente.replace(' ', '_') if cliente.strip() else 'Sem_Nome'}.pdf"
     
-    # 3. Enviar PDF por Email (Usando a nova função)
+    # 3. Enviar PDF por Email para a Empresa (Automático na criação)
     sucesso, msg_email = enviar_email_pdf(cliente, tecnico, buffer_pdf, nome_ficheiro)
     if sucesso:
         st.success(msg_email)
@@ -555,14 +553,27 @@ if len(obras_todas) > 0:
                 with col_acoes:
                     st.markdown("**Ações Rápidas**")
                     
-                    # --- NOVO BOTÃO PARA REENVIAR EMAIL APÓS EDIÇÃO ---
-                    if st.button("📧 Reenviar PDF por Email", key=f"btn_reenviar_{id_obra}", use_container_width=True):
+                    # --- BOTÃO PARA REENVIAR EMAIL PARA A EMPRESA ---
+                    if st.button("📧 Enviar PDF p/ Empresa", key=f"btn_reenviar_{id_obra}", use_container_width=True):
                         nome_f = f"FO_{obra_sel.get('cliente', 'Sem_Nome').replace(' ', '_')}.pdf"
                         sucesso_envio, msg_envio = enviar_email_pdf(obra_sel.get('cliente', ''), obra_sel.get('tecnico', ''), meu_pdf_gerado, nome_f)
                         if sucesso_envio:
                             st.success(msg_envio)
                         else:
                             st.error(msg_envio)
+                            
+                    # --- NOVO BOTÃO PARA ENVIAR EMAIL PARA O CLIENTE ---
+                    if st.button("📧 Enviar PDF p/ Cliente", key=f"btn_env_cli_{id_obra}", use_container_width=True):
+                        email_cliente = obra_sel.get('email', '').strip()
+                        if email_cliente:
+                            nome_f = f"FO_{obra_sel.get('cliente', 'Sem_Nome').replace(' ', '_')}.pdf"
+                            sucesso_envio, msg_envio = enviar_email_pdf(obra_sel.get('cliente', ''), obra_sel.get('tecnico', ''), meu_pdf_gerado, nome_f, destinatario=email_cliente)
+                            if sucesso_envio:
+                                st.success(msg_envio)
+                            else:
+                                st.error(msg_envio)
+                        else:
+                            st.warning("Este cliente não tem um endereço de email associado.")
                             
                     st.markdown("---")
                     
