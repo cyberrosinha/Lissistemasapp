@@ -4,6 +4,7 @@ import os
 import io
 import json
 import ast
+import inspect
 import datetime
 import base64
 from PIL import Image as PILImage
@@ -45,6 +46,18 @@ def carregar_json_safe(texto, default_val):
             return ast.literal_eval(texto)
         except Exception:
             return default_val
+
+# --- FUNÇÃO SEGURA PARA RENDERIZAR O CANVAS (COMPATÍVEL COM TODAS AS VERSÕES) ---
+def render_canvas_safe(**kwargs):
+    try:
+        sig = inspect.signature(st_canvas).parameters
+        filtered = {k: v for k, v in kwargs.items() if k in sig}
+        if "return_image_data" in sig:
+            filtered["return_image_data"] = True
+        return st_canvas(**filtered)
+    except Exception:
+        kwargs.pop("display_toolbar", None)
+        return st_canvas(**kwargs)
 
 # --- FUNÇÃO PARA ENVIAR O PDF POR EMAIL ---
 def enviar_email_pdf(cliente, tecnico, buffer_pdf, nome_ficheiro, destinatario="service@lissistemas.pt"):
@@ -380,7 +393,7 @@ st.divider()
 
 st.markdown("### 7. Assinatura do Cliente")
 st.caption("Assine dentro do quadro abaixo (Opcional).")
-canvas_result = st_canvas(
+canvas_result = render_canvas_safe(
     fill_color="rgba(255, 255, 255, 1)",
     stroke_width=2,
     stroke_color="#000000",
@@ -389,8 +402,7 @@ canvas_result = st_canvas(
     width=380,
     drawing_mode="freedraw",
     key="canvas_principal",
-    update_streamlit=True,
-    display_toolbar=True
+    update_streamlit=True
 )
 st.info("Com a assinatura do presente documento, valido o descrito nesta folha de obra e declaro a conformidade das horas e dos materiais registados.")
 st.divider()
@@ -403,14 +415,15 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
     if canvas_result.json_data is not None and len(canvas_result.json_data.get("objects", [])) > 0:
         assinou = True
         try:
-            img_data = canvas_result.image_data
-            pil_img = PILImage.fromarray(img_data.astype('uint8'), 'RGBA')
-            bg = PILImage.new("RGB", pil_img.size, (255,255,255))
-            bg.paste(pil_img, mask=pil_img.split()[3])
-            assinatura_buffer = io.BytesIO()
-            bg.save(assinatura_buffer, format="PNG")
-            assinatura_buffer.seek(0)
-            assinatura_b64 = base64.b64encode(assinatura_buffer.getvalue()).decode('utf-8')
+            img_data = getattr(canvas_result, "image_data", None)
+            if img_data is not None:
+                pil_img = PILImage.fromarray(img_data.astype('uint8'), 'RGBA')
+                bg = PILImage.new("RGB", pil_img.size, (255,255,255))
+                bg.paste(pil_img, mask=pil_img.split()[3])
+                assinatura_buffer = io.BytesIO()
+                bg.save(assinatura_buffer, format="PNG")
+                assinatura_buffer.seek(0)
+                assinatura_b64 = base64.b64encode(assinatura_buffer.getvalue()).decode('utf-8')
         except Exception:
             assinou = False
 
@@ -645,7 +658,7 @@ if len(obras_todas) > 0:
                     edit_canvas_result = None
                     if ativar_assinatura:
                         st.caption("Assine no quadro abaixo:")
-                        edit_canvas_result = st_canvas(
+                        edit_canvas_result = render_canvas_safe(
                             fill_color="rgba(255, 255, 255, 1)",
                             stroke_width=2,
                             stroke_color="#000000",
@@ -654,22 +667,22 @@ if len(obras_todas) > 0:
                             width=380,
                             drawing_mode="freedraw",
                             key=f"edit_canvas_{id_obra}",
-                            update_streamlit=True,
-                            display_toolbar=True
+                            update_streamlit=True
                         )
 
                     if st.button("Guardar Alterações da Obra", key=f"btn_save_{id_obra}", type="primary", use_container_width=True):
                         nova_ass_b64 = obra_sel.get('assinatura', '')
                         if ativar_assinatura and edit_canvas_result is not None and edit_canvas_result.json_data is not None and len(edit_canvas_result.json_data.get("objects", [])) > 0:
                             try:
-                                img_d = edit_canvas_result.image_data
-                                p_img = PILImage.fromarray(img_d.astype('uint8'), 'RGBA')
-                                bg_img = PILImage.new("RGB", p_img.size, (255,255,255))
-                                bg_img.paste(p_img, mask=p_img.split()[3])
-                                b_buf = io.BytesIO()
-                                bg_img.save(b_buf, format="PNG")
-                                b_buf.seek(0)
-                                nova_ass_b64 = base64.b64encode(b_buf.getvalue()).decode('utf-8')
+                                img_d = getattr(edit_canvas_result, "image_data", None)
+                                if img_d is not None:
+                                    p_img = PILImage.fromarray(img_d.astype('uint8'), 'RGBA')
+                                    bg_img = PILImage.new("RGB", p_img.size, (255,255,255))
+                                    bg_img.paste(p_img, mask=p_img.split()[3])
+                                    b_buf = io.BytesIO()
+                                    bg_img.save(b_buf, format="PNG")
+                                    b_buf.seek(0)
+                                    nova_ass_b64 = base64.b64encode(b_buf.getvalue()).decode('utf-8')
                             except Exception:
                                 pass
 
