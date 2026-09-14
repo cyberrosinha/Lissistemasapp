@@ -1,0 +1,17 @@
+name: Manter Supabase Ativo
+
+on:
+  schedule:
+    # Executa de 3 em 3 dias às 08:00 UTC
+    - cron: '0 8 */3 * *'
+  workflow_dispatch:
+
+jobs:
+  ping-supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase Database
+        run: |
+          curl -s -X GET "https://${{ secrets.SUPABASE_PROJECT_REF }}.supabase.co/rest/v1/folhas_obra?select=id&limit=1" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
