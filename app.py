@@ -47,7 +47,7 @@ def carregar_json_safe(texto, default_val):
         except Exception:
             return default_val
 
-# --- FUNÇÃO SEGURA PARA RENDERIZAR O CANVAS (COMPATÍVEL COM TODAS AS VERSÕES) ---
+# --- FUNÇÃO SEGURA PARA RENDERIZAR O CANVAS ---
 def render_canvas_safe(**kwargs):
     try:
         sig = inspect.signature(st_canvas).parameters
@@ -60,7 +60,7 @@ def render_canvas_safe(**kwargs):
         return st_canvas(**kwargs)
 
 # --- FUNÇÃO PARA ENVIAR O PDF POR EMAIL ---
-def enviar_email_pdf(cliente, tecnico, buffer_pdf, nome_ficheiro, destinatario="service@lissistemas.pt"):
+def enviar_email_pdf(cliente, tecnico, buffer_pdf, nome_ficheiro, id_obra=None, destinatario="service@lissistemas.pt"):
     try:
         remetente = st.secrets.get("EMAIL_REMETENTE")
         password = st.secrets.get("EMAIL_PASSWORD")
@@ -68,12 +68,13 @@ def enviar_email_pdf(cliente, tecnico, buffer_pdf, nome_ficheiro, destinatario="
         porta_smtp = int(st.secrets.get("SMTP_PORT", 587))
         
         if remetente and password and servidor_smtp:
+            ref_num = f" Nº {id_obra}" if id_obra else ""
             msg = MIMEMultipart()
             msg['From'] = remetente
             msg['To'] = destinatario
-            msg['Subject'] = f"Folha de Obra: {cliente}"
+            msg['Subject'] = f"Folha de Obra{ref_num}: {cliente}"
             
-            corpo_email = f"A folha de obra do cliente {cliente} foi registada/atualizada pelo técnico {tecnico}.\n\nO ficheiro PDF segue em anexo."
+            corpo_email = f"A folha de obra{ref_num} do cliente {cliente} foi registada/atualizada pelo técnico {tecnico}.\n\nO ficheiro PDF segue em anexo."
             msg.attach(MIMEText(corpo_email, 'plain'))
             
             anexo = MIMEBase('application', 'octet-stream')
@@ -93,7 +94,7 @@ def enviar_email_pdf(cliente, tecnico, buffer_pdf, nome_ficheiro, destinatario="
     except Exception as e:
         return False, f"Ocorreu um erro ao enviar o email: {str(e)}"
 
-# --- 2. FUNÇÃO PARA GERAR O PDF PROFISSIONAL COM LOGÓTIPO E TABELAS ---
+# --- 2. FUNÇÃO PARA GERAR O PDF PROFISSIONAL COM LOGÓTIPO, NÚMERO E TABELAS ---
 def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -114,7 +115,7 @@ def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     estilo_total = ParagraphStyle('Total', fontName='Helvetica-Bold', fontSize=12, leading=16, textColor=colors.HexColor("#DC2626"))
     estilo_disclaimer = ParagraphStyle('Disclaimer', fontName='Helvetica-Oblique', fontSize=8, leading=11, textColor=colors.HexColor("#64748B"))
 
-    # 1. Cabeçalho com Logótipo
+    # 1. Cabeçalho com Logótipo e Número da Obra
     logo_cell = ""
     if os.path.exists("logo.png"):
         try:
@@ -124,7 +125,12 @@ def gerar_pdf_obra(dados, assinatura_buffer, assinou):
     else:
         logo_cell = Paragraph("<b>LIS SISTEMAS</b>", estilo_titulo)
 
-    header_text = Paragraph("<b>FOLHA DE OBRA</b>", estilo_titulo)
+    # Identificação do Número da Folha de Obra no título do PDF
+    num_obra = dados.get('id')
+    if num_obra:
+        header_text = Paragraph(f"<b>FOLHA DE OBRA Nº {num_obra}</b>", estilo_titulo)
+    else:
+        header_text = Paragraph("<b>FOLHA DE OBRA</b>", estilo_titulo)
     
     tabela_header = Table([[logo_cell, header_text]], colWidths=[200, 320])
     tabela_header.setStyle(TableStyle([
@@ -448,28 +454,49 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
         "assinatura": assinatura_b64
     }
 
-    # 1. Guardar no Supabase
+    # 1. Guardar no Supabase e Obter o ID Sequencial
+    id_novo = None
     try:
-        supabase.table("folhas_obra").insert(dados_obra).execute()
+        resp_insert = supabase.table("folhas_obra").insert(dados_obra).execute()
+        if resp_insert.data and len(resp_insert.data) > 0:
+            id_novo = resp_insert.data[0].get("id")
         st.success("Obra guardada com sucesso na Base de Dados!")
     except Exception as err:
         if "column" in str(err).lower() or "schema" in str(err).lower() or "pgrst" in str(err).lower():
             st.warning("⚠️ Aviso: As colunas 'produtos', 'materiais' ou 'assinatura' não foram encontradas no teu Supabase! A gravar apenas os dados básicos...")
             dados_base = {k: v for k, v in dados_obra.items() if k not in ["produtos", "materiais", "assinatura"]}
             try:
-                supabase.table("folhas_obra").insert(dados_base).execute()
+                resp_insert_base = supabase.table("folhas_obra").insert(dados_base).execute()
+                if resp_insert_base.data and len(resp_insert_base.data) > 0:
+                    id_novo = resp_insert_base.data[0].get("id")
                 st.success("Obra guardada (sem as tabelas/assinaturas) com sucesso!")
             except Exception as err2:
                 st.error(f"Erro ao guardar na base de dados: {err2}")
         else:
             st.error(f"Erro ao guardar na base de dados: {err}")
 
-    # 2. Gerar PDF
+    # Se por algum motivo o ID não veio no retorno, obtém o ID mais recente
+    if not id_novo:
+        try:
+            ultimo = supabase.table("folhas_obra").select("id").order("id", desc=True).limit(1).execute()
+            if ultimo.data:
+                id_novo = ultimo.data[0].get("id")
+        except Exception:
+            pass
+
+    if id_novo:
+        dados_obra["id"] = id_novo
+
+    # 2. Gerar PDF com o Número e Nome Formatados
     buffer_pdf = gerar_pdf_obra(dados_obra, assinatura_buffer, assinou)
-    nome_ficheiro = f"FO_{cliente.replace(' ', '_') if cliente.strip() else 'Sem_Nome'}.pdf"
+    
+    # Formatação do nome do ficheiro (ex.: FO_102_Nome_Cliente.pdf)
+    id_str = f"_{id_novo}" if id_novo else ""
+    cli_str = cliente.strip().replace(' ', '_') if cliente.strip() else 'Sem_Nome'
+    nome_ficheiro = f"FO{id_str}_{cli_str}.pdf"
     
     # 3. Enviar PDF por Email para a Empresa (Automático na criação)
-    sucesso, msg_email = enviar_email_pdf(cliente, tecnico, buffer_pdf, nome_ficheiro)
+    sucesso, msg_email = enviar_email_pdf(cliente, tecnico, buffer_pdf, nome_ficheiro, id_obra=id_novo)
     if sucesso:
         st.success(msg_email)
     else:
@@ -477,7 +504,7 @@ if st.button("CONCLUIR E GERAR FOLHA DE OBRA", type="primary", use_container_wid
 
     # 4. Botão de Download Manual
     st.download_button(
-        label="DESCARREGAR PDF",
+        label=f"DESCARREGAR PDF ({nome_ficheiro})",
         data=buffer_pdf,
         file_name=nome_ficheiro,
         mime="application/pdf"
@@ -523,6 +550,8 @@ if len(obras_todas) > 0:
         if escolha:
             obra_sel = opcoes[escolha]
             id_obra = obra_sel['id']
+            cli_slug = obra_sel.get('cliente', 'Sem_Nome').strip().replace(' ', '_')
+            nome_f_obra = f"FO_{id_obra}_{cli_slug}.pdf"
             
             ass_b64 = obra_sel.get('assinatura')
             ass_buf = None
@@ -541,6 +570,7 @@ if len(obras_todas) > 0:
                 col_info, col_acoes = st.columns([2, 1])
                 
                 with col_info:
+                    st.write(f"**Folha de Obra Nº:** {id_obra}")
                     st.write(f"**Data:** {obra_sel['created_at'][:10]}")
                     st.write(f"**Cliente / Empresa:** {obra_sel.get('cliente', '')}")
                     st.write(f"**Responsável:** {obra_sel.get('nome_contacto', '')}")
@@ -556,9 +586,9 @@ if len(obras_todas) > 0:
                     st.markdown(pdf_display, unsafe_allow_html=True)
                     
                     st.download_button(
-                        label="Descarregar Ficheiro PDF",
+                        label=f"Descarregar Ficheiro PDF ({nome_f_obra})",
                         data=meu_pdf_gerado,
-                        file_name=f"Folha_Obra_{obra_sel['id']}.pdf",
+                        file_name=nome_f_obra,
                         mime="application/pdf",
                         key=f"dl_pdf_{id_obra}"
                     )
@@ -568,19 +598,30 @@ if len(obras_todas) > 0:
                     
                     # --- BOTÃO PARA REENVIAR EMAIL PARA A EMPRESA ---
                     if st.button("📧 Enviar PDF p/ Empresa", key=f"btn_reenviar_{id_obra}", use_container_width=True):
-                        nome_f = f"FO_{obra_sel.get('cliente', 'Sem_Nome').replace(' ', '_')}.pdf"
-                        sucesso_envio, msg_envio = enviar_email_pdf(obra_sel.get('cliente', ''), obra_sel.get('tecnico', ''), meu_pdf_gerado, nome_f)
+                        sucesso_envio, msg_envio = enviar_email_pdf(
+                            obra_sel.get('cliente', ''), 
+                            obra_sel.get('tecnico', ''), 
+                            meu_pdf_gerado, 
+                            nome_f_obra,
+                            id_obra=id_obra
+                        )
                         if sucesso_envio:
                             st.success(msg_envio)
                         else:
                             st.error(msg_envio)
                             
-                    # --- NOVO BOTÃO PARA ENVIAR EMAIL PARA O CLIENTE ---
+                    # --- BOTÃO PARA ENVIAR EMAIL PARA O CLIENTE ---
                     if st.button("📧 Enviar PDF p/ Cliente", key=f"btn_env_cli_{id_obra}", use_container_width=True):
                         email_cliente = obra_sel.get('email', '').strip()
                         if email_cliente:
-                            nome_f = f"FO_{obra_sel.get('cliente', 'Sem_Nome').replace(' ', '_')}.pdf"
-                            sucesso_envio, msg_envio = enviar_email_pdf(obra_sel.get('cliente', ''), obra_sel.get('tecnico', ''), meu_pdf_gerado, nome_f, destinatario=email_cliente)
+                            sucesso_envio, msg_envio = enviar_email_pdf(
+                                obra_sel.get('cliente', ''), 
+                                obra_sel.get('tecnico', ''), 
+                                meu_pdf_gerado, 
+                                nome_f_obra,
+                                id_obra=id_obra,
+                                destinatario=email_cliente
+                            )
                             if sucesso_envio:
                                 st.success(msg_envio)
                             else:
